@@ -1,9 +1,16 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Solo permite leer y escribir el documento compartido de la familia
-    // En producción podés agregar autenticación si querés más seguridad
     match /familyData/{document} {
+      allow read, write: if true;
+    }
+    match /memberPhotos/{document} {
+      allow read, write: if true;
+    }
+    match /pushTokens/{document} {
+      allow read, write: if true;
+    }
+    match /fcmTokens/{document} {
       allow read, write: if true;
     }
   }
