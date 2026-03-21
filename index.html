@@ -1,66 +1,23 @@
-// ─────────────────────────────────────────────────────────────
-//  Firebase Cloud Function — Recordatorios diarios de turnos
-//  Se ejecuta todos los días a las 8:00 AM (Argentina, UTC-3)
-// ─────────────────────────────────────────────────────────────
-const functions = require("firebase-functions");
-const admin = require("firebase-admin");
-admin.initializeApp();
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#3D405B" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Salud Familiar" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
 
-exports.recordatorioTurnos = functions.pubsub
-  .schedule("0 11 * * *")  // 11 UTC = 8am Argentina
-  .timeZone("America/Argentina/Buenos_Aires")
-  .onRun(async () => {
-    const db = admin.firestore();
-    const messaging = admin.messaging();
+    <!-- OneSignal Push Notifications (gratis, sin tarjeta) -->
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 
-    // Get family data
-    const snap = await db.doc("familyData/shared").get();
-    if (!snap.exists) return null;
-    const data = snap.data();
-
-    // Get all FCM tokens
-    const tokensSnap = await db.collection("fcmTokens").get();
-    const tokens = tokensSnap.docs.map(d => d.data().token).filter(Boolean);
-    if (!tokens.length) return null;
-
-    // Find today and tomorrow appointments
-    const today = new Date(); today.setHours(0,0,0,0);
-    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate()+1);
-    const toISO = d => d.toISOString().split("T")[0];
-    const todayStr = toISO(today);
-    const tmrwStr  = toISO(tomorrow);
-
-    const members = data.members || [];
-    const appointments = data.appointments || [];
-    const messages = [];
-
-    appointments.forEach(a => {
-      const mb = members.find(m => m.id === a.memberId);
-      const name = mb?.name || "Integrante";
-      if (a.date === todayStr) {
-        messages.push({ title: `🔴 Turno HOY — ${name}`, body: `${a.title}${a.time ? " a las " + a.time : ""}${a.specialist ? " · " + a.specialist : ""}` });
-      } else if (a.date === tmrwStr) {
-        messages.push({ title: `🟡 Turno MAÑANA — ${name}`, body: `${a.title}${a.time ? " a las " + a.time : ""}${a.specialist ? " · " + a.specialist : ""}` });
-      }
-    });
-
-    // Also check pending vaccines due today/tomorrow
-    // (simplified — full logic in frontend)
-
-    if (!messages.length) return null;
-
-    // Send one notification per appointment to all tokens
-    for (const msg of messages) {
-      await messaging.sendEachForMulticast({
-        tokens,
-        notification: { title: msg.title, body: msg.body },
-        webpush: {
-          notification: { icon: "/icon-192.png", badge: "/icon-192.png", vibrate: [200,100,200] },
-          fcmOptions: { link: "/" }
-        }
-      });
-    }
-
-    console.log(`Sent ${messages.length} reminders to ${tokens.length} devices`);
-    return null;
-  });
+    <title>Salud Familiar</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
