@@ -52,6 +52,48 @@ const getAge = bd => { if(!bd) return null; return Math.floor((Date.now()-new Da
 const addMonths = (date,m) => { const d=new Date(date); d.setMonth(d.getMonth()+m); return d; };
 const vacKey = v => `${v.vaccine}||${v.dosis}`;
 
+// ── IMC & Crecimiento ──
+function calcIMC(peso, talla) {
+  if (!peso || !talla) return null;
+  const m = talla / 100;
+  return (peso / (m * m)).toFixed(1);
+}
+function imcLabel(imc) {
+  if (!imc) return null;
+  const v = parseFloat(imc);
+  if (v < 18.5) return { label:"Bajo peso", color:"#4A90A4" };
+  if (v < 25)   return { label:"Normal",    color:"#5B8C5A" };
+  if (v < 30)   return { label:"Sobrepeso", color:"#C9A96E" };
+  return             { label:"Obesidad",   color:"#E07A5F" };
+}
+// OMS Percentiles peso (kg) por edad (meses) — niños 0-60m aproximado (p3,p15,p50,p85,p97)
+const OMS_PESO_NINO = {
+  0:[2.5,2.9,3.3,3.7,4.2], 3:[5.0,5.6,6.4,7.2,7.9], 6:[6.4,7.1,7.9,8.8,9.7],
+  12:[8.1,8.9,9.6,10.8,11.8], 24:[10.2,11.5,12.2,13.5,15.0], 36:[12.0,13.5,14.3,16.0,17.5],
+  48:[13.7,15.3,16.3,18.3,20.0], 60:[15.2,17.0,18.3,20.5,22.5]
+};
+const OMS_PESO_NINA = {
+  0:[2.4,2.8,3.2,3.6,4.0], 3:[4.6,5.2,5.8,6.6,7.3], 6:[5.7,6.5,7.3,8.2,9.3],
+  12:[7.3,8.1,8.9,10.1,11.5], 24:[9.8,11.1,11.5,13.2,14.8], 36:[11.5,13.0,13.9,15.7,17.5],
+  48:[13.0,14.8,16.1,18.3,20.4], 60:[14.2,16.4,18.2,20.8,23.5]
+};
+function getPercentile(peso, ageMonths, sexo) {
+  if (!peso || !ageMonths) return null;
+  const table = sexo === "F" ? OMS_PESO_NINA : OMS_PESO_NINO;
+  const keys = Object.keys(table).map(Number).sort((a,b)=>a-b);
+  let closest = keys[0];
+  for (const k of keys) { if (ageMonths >= k) closest = k; }
+  const refs = table[closest];
+  if (!refs) return null;
+  const p = parseFloat(peso);
+  if (p <= refs[0]) return { pct:"<p3",  label:"Muy bajo", color:"#E07A5F" };
+  if (p <= refs[1]) return { pct:"p3-15", label:"Bajo",   color:"#C9A96E" };
+  if (p <= refs[2]) return { pct:"p15-50",label:"Normal", color:"#5B8C5A" };
+  if (p <= refs[3]) return { pct:"p50-85",label:"Normal", color:"#5B8C5A" };
+  if (p <= refs[4]) return { pct:"p85-97",label:"Alto",   color:"#C9A96E" };
+  return               { pct:">p97",  label:"Muy alto", color:"#E07A5F" };
+}
+
 // ── PDF Engine (uses jsPDF loaded via script tag) ──
 function loadJsPDF() {
   return new Promise((resolve, reject) => {
@@ -399,7 +441,72 @@ const INIT = {
 
 const FIRESTORE_DOC = "familyData/shared";
 
-// Strip photos before cloud save (too large for Firestore 1MB limit)
+// Compress image to max 200px and low quality to keep under Firestore limits
+function compressPhoto(dataUrl) {
+  return new Promise(resolve => {
+    if (!dataUrl || dataUrl === "__HAS_PHOTO__") { resolve(dataUrl); return; }
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 200;
+      let w = img.width, h = img.height;
+      if (w > h) { if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; } }
+      else       { if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; } }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", 0.55));
+    };
+    img.onerror = () => resolve("");
+    img.src = dataUrl;
+  });
+}
+
+// Save photos in SEPARATE Firestore docs (one per member) — avoids 1MB limit
+async function savePhotosToFirestore(members) {
+  for (const m of members) {
+    if (!m.photo || m.photo === "__HAS_PHOTO__") continue;
+    try {
+      const compressed = await compressPhoto(m.photo);
+      const photoRef = doc(db, "memberPhotos", String(m.id));
+      await setDoc(photoRef, { photo: compressed, updatedAt: Date.now() });
+      // Also cache locally as backup
+      try {
+        const cached = JSON.parse(localStorage.getItem("sfv_photos") || "{}");
+        cached[m.id] = compressed;
+        localStorage.setItem("sfv_photos", JSON.stringify(cached));
+      } catch {}
+    } catch {}
+  }
+}
+
+// Load photos from Firestore (separate docs) and merge into data
+async function loadPhotosFromFirestore(members) {
+  const photos = {};
+  // First try localStorage as quick cache
+  try {
+    const cached = JSON.parse(localStorage.getItem("sfv_photos") || "{}");
+    Object.assign(photos, cached);
+  } catch {}
+  // Then fetch from Firestore for each member
+  for (const m of members) {
+    try {
+      const photoRef = doc(db, "memberPhotos", String(m.id));
+      const snap = await getDoc(photoRef);
+      if (snap.exists() && snap.data().photo) {
+        photos[m.id] = snap.data().photo;
+        // Update local cache
+        try {
+          const cached = JSON.parse(localStorage.getItem("sfv_photos") || "{}");
+          cached[m.id] = snap.data().photo;
+          localStorage.setItem("sfv_photos", JSON.stringify(cached));
+        } catch {}
+      }
+    } catch {}
+  }
+  return photos;
+}
+
+// Strip photos before saving main doc (photos go to separate docs)
 function stripPhotos(data) {
   return {
     ...data,
@@ -407,27 +514,14 @@ function stripPhotos(data) {
   };
 }
 
-function savePhotosLocally(members) {
-  try {
-    const photos = {};
-    members.forEach(m => { if (m.photo && m.photo !== "__HAS_PHOTO__") photos[m.id] = m.photo; });
-    localStorage.setItem("sfv_photos", JSON.stringify(photos));
-  } catch {}
-}
-
-function mergePhotos(cloudData) {
-  try {
-    const localRaw = localStorage.getItem("sfv_photos");
-    if (!localRaw) return cloudData;
-    const photos = JSON.parse(localRaw);
-    return {
-      ...cloudData,
-      members: cloudData.members.map(m => ({
-        ...m,
-        photo: m.photo === "__HAS_PHOTO__" ? (photos[m.id] || "") : (m.photo || "")
-      }))
-    };
-  } catch { return cloudData; }
+function applyPhotos(cloudData, photos) {
+  return {
+    ...cloudData,
+    members: cloudData.members.map(m => ({
+      ...m,
+      photo: photos[m.id] || (m.photo !== "__HAS_PHOTO__" ? m.photo : "") || ""
+    }))
+  };
 }
 
 // ══════════════════════════════════════════
@@ -444,21 +538,22 @@ export default function App() {
   const [modal, setModal]         = useState(null);
   const [editItem, setEditItem]   = useState(null);
   const [pdfModal, setPdfModal]   = useState(false);
+  const [toastMsg, setToastMsg]   = useState(null);
   const [search, setSearch]       = useState("");
   const [reminderMode, setReminderMode] = useState("lista");
   const [calMonth, setCalMonth]   = useState(()=>{ const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; });
 
-  // ── Firebase: realtime listener (updates INSTANTLY on all devices) ──
+  // ── Firebase: realtime listener ──
   useEffect(() => {
     const ref = doc(db, "familyData", "shared");
     const unsub = onSnapshot(ref,
-      (snap) => {
+      async (snap) => {
         if (snap.exists()) {
           const cloud = snap.data();
+          const photos = await loadPhotosFromFirestore(cloud.members || []);
           setData(prev => {
-            // Only replace if cloud is newer
             if ((cloud._ts || 0) > (prev._ts || 0)) {
-              return mergePhotos(cloud);
+              return applyPhotos(cloud, photos);
             }
             return prev;
           });
@@ -479,10 +574,11 @@ export default function App() {
   // ── Save to Firestore whenever data changes (debounced 600ms) ──
   useEffect(() => {
     if (!synced) return;
-    savePhotosLocally(data.members);
     const t = setTimeout(async () => {
       try {
         const ref = doc(db, "familyData", "shared");
+        const membersWithPhotos = data.members.filter(m => m.photo && m.photo !== "__HAS_PHOTO__");
+        if (membersWithPhotos.length > 0) await savePhotosToFirestore(membersWithPhotos);
         await setDoc(ref, stripPhotos(data));
         setSyncStatus("ok");
         setLastSync(new Date());
@@ -493,6 +589,59 @@ export default function App() {
     }, 600);
     return () => clearTimeout(t);
   }, [data, synced]);
+
+  // ── OneSignal Push Notifications ──
+  useEffect(() => {
+    if (!synced) return;
+    // OneSignal SDK loaded via script tag in index.html
+    // It handles permission request and subscription automatically
+    if (typeof window.OneSignal === "undefined") return;
+    window.OneSignal.push(() => {
+      window.OneSignal.init({
+        appId: "REEMPLAZAR_CON_ONESIGNAL_APP_ID",
+        safari_web_id: "web.onesignal.auto.REEMPLAZAR",
+        notifyButton: { enable: false },
+        allowLocalhostAsSecureOrigin: true,
+      });
+      // Ask permission after first interaction
+      window.OneSignal.showSlidedownPrompt();
+    });
+  }, [synced]);
+
+  // ── Schedule notifications for today/tomorrow turnos via OneSignal ──
+  useEffect(() => {
+    if (!synced) return;
+    async function scheduleReminders() {
+      if (typeof window.OneSignal === "undefined") return;
+      try {
+        const userId = await new Promise(res => window.OneSignal.getUserId(res));
+        if (!userId) return;
+        // Store userId so Cloud-side can target this device
+        await setDoc(doc(db, "pushTokens", userId), {
+          userId,
+          updatedAt: Date.now()
+        }, { merge: true });
+      } catch {}
+    }
+    scheduleReminders();
+  }, [synced]);
+
+  // ── Daily appointment reminder check ──
+  useEffect(() => {
+    if (!synced) return;
+    const todayAppts = data.appointments.filter(a => daysUntil(a.date) === 0);
+    const tmrwAppts  = data.appointments.filter(a => daysUntil(a.date) === 1);
+    const vacAlerts  = data.members.flatMap(m =>
+      pendingVaccines(m, data.appliedVaccines?.[m.id]||[]).filter(v => v.days === 0 || v.days === 1)
+    );
+    if (todayAppts.length || tmrwAppts.length || vacAlerts.length) {
+      let msg = "";
+      todayAppts.forEach(a => { const mb = data.members.find(m=>m.id===a.memberId); msg += `🔴 HOY: ${a.title} (${mb?.name}) · `; });
+      tmrwAppts.forEach(a  => { const mb = data.members.find(m=>m.id===a.memberId); msg += `🟡 MAÑANA: ${a.title} (${mb?.name}) · `; });
+      vacAlerts.forEach(v  => { msg += `💉 Vacuna ${v.days===0?"HOY":"MAÑANA"}: ${v.vaccine} (${v.memberName}) · `; });
+      setToastMsg(msg.slice(0,-3));
+    }
+  }, [synced, data.appointments, data.appliedVaccines]);
 
   // ── Wrap setData to always stamp a timestamp ──
   function setDataTS(updater) {
@@ -567,6 +716,32 @@ export default function App() {
   const delIllness  = id => setDataTS(d=>({...d,illnesses:(d.illnesses||[]).filter(il=>il.id!==id)}));
   const toggleIllnessActive = id => setDataTS(d=>({...d,illnesses:(d.illnesses||[]).map(il=>il.id===id?{...il,active:!il.active}:il)}));
 
+  // Measurements CRUD
+  const saveMeasurement = (membId, meas) => {
+    setDataTS(d => {
+      const list = d.measurements?.[membId] || [];
+      const exists = list.find(x => x.id === meas.id);
+      const updated = exists ? list.map(x => x.id===meas.id?meas:x) : [...list, {...meas, id:Date.now()}];
+      return { ...d, measurements: { ...d.measurements, [membId]: updated } };
+    });
+  };
+  const delMeasurement = (membId, id) => setDataTS(d => ({
+    ...d, measurements: { ...d.measurements, [membId]: (d.measurements?.[membId]||[]).filter(x=>x.id!==id) }
+  }));
+
+  // Custom vaccines CRUD
+  const saveCustomVaccine = (membId, vac) => {
+    setDataTS(d => {
+      const list = d.customVaccines?.[membId] || [];
+      const exists = list.find(x => x.id === vac.id);
+      const updated = exists ? list.map(x => x.id===vac.id?vac:x) : [...list, {...vac, id:Date.now()}];
+      return { ...d, customVaccines: { ...d.customVaccines, [membId]: updated } };
+    });
+  };
+  const delCustomVaccine = (membId, id) => setDataTS(d => ({
+    ...d, customVaccines: { ...d.customVaccines, [membId]: (d.customVaccines?.[membId]||[]).filter(x=>x.id!==id) }
+  }));
+
   // Vaccine helpers
   const markApplied   = (membId, key) => setDataTS(d=>({...d,appliedVaccines:{...d.appliedVaccines,[membId]:[...(d.appliedVaccines?.[membId]||[]),key]}}));
   const unmarkApplied = (membId, key) => setDataTS(d=>({...d,appliedVaccines:{...d.appliedVaccines,[membId]:(d.appliedVaccines?.[membId]||[]).filter(k=>k!==key)}}));
@@ -635,7 +810,7 @@ export default function App() {
 
   return (
     <div style={S.app}>
-      <style>{`*{box-sizing:border-box}body{margin:0}button:hover{opacity:.83;transition:opacity .15s}input,select,textarea{font-family:'DM Sans',sans-serif}`}</style>
+      <style>{`*{box-sizing:border-box}body{margin:0}button:hover{opacity:.83;transition:opacity .15s}input,select,textarea{font-family:'DM Sans',sans-serif}@keyframes slideDown{from{transform:translateY(-80px);opacity:0}to{transform:translateY(0);opacity:1}}`}</style>
       <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 
       <header style={S.header}>
@@ -653,6 +828,14 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Toast notification banner */}
+      {toastMsg&&(
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:999,background:"#3D405B",color:"#fff",padding:"12px 16px",fontSize:13,lineHeight:1.5,animation:"slideDown .3s ease",display:"flex",alignItems:"flex-start",gap:10}}>
+          <div style={{flex:1}}>{toastMsg}</div>
+          <button style={{background:"none",border:"none",color:"#fff",fontSize:18,cursor:"pointer",flexShrink:0,padding:0}} onClick={()=>setToastMsg(null)}>×</button>
+        </div>
+      )}
 
       <main style={S.main}>
 
@@ -792,8 +975,37 @@ export default function App() {
               <button style={{...S.iBtn,fontSize:16,background:"#F2CC8F33",border:"1px solid #C9A96E",borderRadius:8,padding:"4px 8px"}} title="Exportar PDF" onClick={()=>setPdfModal(true)}>📄</button>
             </div>
 
+            {/* Alerta de turno HOY o MAÑANA */}
+            {(()=>{
+              const todayAppts = data.appointments.filter(a=>daysUntil(a.date)===0&&a.memberId===member.id);
+              const tmrwAppts  = data.appointments.filter(a=>daysUntil(a.date)===1&&a.memberId===member.id);
+              if(!todayAppts.length&&!tmrwAppts.length) return null;
+              return (
+                <div style={{background:"#FFE8E8",border:"1px solid #F8BCBC",borderRadius:12,padding:"12px 14px",marginBottom:14}}>
+                  {todayAppts.map(a=>(
+                    <div key={a.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <span style={{fontSize:18}}>🔴</span>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:700,color:"#C0392B"}}>HOY — {a.title}</div>
+                        <div style={{fontSize:11,color:"#888"}}>{a.specialist}{a.time?` · ${a.time}`:""}{a.location?` · ${a.location}`:""}</div>
+                      </div>
+                    </div>
+                  ))}
+                  {tmrwAppts.map(a=>(
+                    <div key={a.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <span style={{fontSize:18}}>🟡</span>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:700,color:"#7D5A30"}}>MAÑANA — {a.title}</div>
+                        <div style={{fontSize:11,color:"#888"}}>{a.specialist}{a.time?` · ${a.time}`:""}{a.location?` · ${a.location}`:""}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
             <div style={S.tabs}>
-              {[["consultas","📋"],["turnos","📅"],["vacunas","💉"],["enfermedades","🤒"]].map(([k,ic])=>(
+              {[["consultas","📋"],["turnos","📅"],["vacunas","💉"],["salud","📊"],["enfermedades","🤒"]].map(([k,ic])=>(
                 <button key={k} style={memberTab===k?S.tabA:S.tabI} onClick={()=>setMemberTab(k)}>
                   {ic} <span style={{fontSize:10,display:"block"}}>{k.charAt(0).toUpperCase()+k.slice(1)}</span>
                 </button>
@@ -915,6 +1127,77 @@ export default function App() {
               </>;
             })()}
 
+            {/* SALUD — Peso, talla, IMC, percentiles */}
+            {memberTab==="salud"&&(()=>{
+              const isChild = member.birthdate && getAge(member.birthdate) < 18;
+              const measurements = (data.measurements?.[member.id]||[]).sort((a,b)=>new Date(b.date)-new Date(a.date));
+              const latest = measurements[0];
+              const imc = latest ? calcIMC(latest.peso, latest.talla) : null;
+              const imcInfo = imcLabel(imc);
+              const ageM = member.birthdate ? Math.floor((Date.now()-new Date(member.birthdate).getTime())/(86400000*30.44)) : 0;
+              const pctInfo = (isChild && latest?.peso) ? getPercentile(latest.peso, ageM, member.sexo||"M") : null;
+              return <>
+                {/* Latest stats */}
+                {latest && (
+                  <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+                    <div style={{flex:1,minWidth:100,background:"#fff",borderRadius:12,padding:"12px 14px",boxShadow:"0 1px 5px rgba(0,0,0,.05)",textAlign:"center"}}>
+                      <div style={{fontSize:22,fontWeight:700,color:"#3D405B"}}>{latest.peso}<span style={{fontSize:12}}> kg</span></div>
+                      <div style={{fontSize:11,color:"#aaa"}}>Peso</div>
+                    </div>
+                    <div style={{flex:1,minWidth:100,background:"#fff",borderRadius:12,padding:"12px 14px",boxShadow:"0 1px 5px rgba(0,0,0,.05)",textAlign:"center"}}>
+                      <div style={{fontSize:22,fontWeight:700,color:"#3D405B"}}>{latest.talla}<span style={{fontSize:12}}> cm</span></div>
+                      <div style={{fontSize:11,color:"#aaa"}}>Talla</div>
+                    </div>
+                    {imc && (
+                      <div style={{flex:1,minWidth:100,background:imcInfo.color+"22",borderRadius:12,padding:"12px 14px",boxShadow:"0 1px 5px rgba(0,0,0,.05)",textAlign:"center"}}>
+                        <div style={{fontSize:22,fontWeight:700,color:imcInfo.color}}>{imc}</div>
+                        <div style={{fontSize:11,color:imcInfo.color,fontWeight:600}}>{imcInfo.label}</div>
+                        {!isChild&&<div style={{fontSize:9,color:"#aaa"}}>IMC</div>}
+                      </div>
+                    )}
+                    {pctInfo && (
+                      <div style={{flex:1,minWidth:100,background:pctInfo.color+"22",borderRadius:12,padding:"12px 14px",boxShadow:"0 1px 5px rgba(0,0,0,.05)",textAlign:"center"}}>
+                        <div style={{fontSize:16,fontWeight:700,color:pctInfo.color}}>{pctInfo.pct}</div>
+                        <div style={{fontSize:11,color:pctInfo.color,fontWeight:600}}>{pctInfo.label}</div>
+                        <div style={{fontSize:9,color:"#aaa"}}>Percentil peso</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Add measurement button */}
+                <div style={S.toolbar}>
+                  <button style={S.addBtn} onClick={()=>setModal("measurement")}>+ Registrar medición</button>
+                </div>
+
+                {/* History */}
+                {measurements.length===0
+                  ?<p style={S.empty}>Sin mediciones registradas.</p>
+                  :<div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {measurements.map((m,i)=>{
+                      const ic = calcIMC(m.peso, m.talla);
+                      const ii = imcLabel(ic);
+                      const pc = (isChild&&m.peso) ? getPercentile(m.peso, Math.floor((new Date(m.date)-new Date(member.birthdate))/(86400000*30.44)), member.sexo||"M") : null;
+                      return (
+                        <div key={m.id||i} style={{background:"#fff",borderRadius:10,padding:"10px 14px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 1px 5px rgba(0,0,0,.05)"}}>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:13,fontWeight:600,color:"#3D405B"}}>{fmt(m.date)}</div>
+                            <div style={{fontSize:12,color:"#888"}}>
+                              {m.peso&&`${m.peso} kg`}{m.talla&&` · ${m.talla} cm`}
+                              {ic&&<span style={{color:ii.color,marginLeft:6,fontWeight:600}}>IMC {ic} — {ii.label}</span>}
+                              {pc&&<span style={{color:pc.color,marginLeft:6,fontWeight:600}}>{pc.pct}</span>}
+                            </div>
+                            {m.notes&&<div style={{fontSize:11,color:"#aaa",marginTop:2}}>{m.notes}</div>}
+                          </div>
+                          <button style={{...S.iBtnSm,color:"#E07A5F"}} onClick={()=>delMeasurement(member.id,m.id)}>🗑️</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                }
+              </>;
+            })()}
+
             {/* ENFERMEDADES */}
             {memberTab==="enfermedades"&&<>
               <div style={S.toolbar}>
@@ -928,6 +1211,14 @@ export default function App() {
       </main>
 
       {/* MODALS */}
+      {modal==="measurement"&&member&&<MeasurementModal
+        member={member}
+        onSave={m=>{ saveMeasurement(member.id,m); closeModal(); }}
+        onClose={closeModal}/>}
+      {modal==="customVac"&&member&&<CustomVaccineModal
+        member={member}
+        onSave={v=>{ saveCustomVaccine(member.id,v); closeModal(); }}
+        onClose={closeModal}/>}
       {modal==="member"   &&<MemberModal   initial={editItem} onSave={saveMember}  onClose={closeModal}/>}
       {modal==="appt"     &&<ApptModal     initial={editItem} members={data.members} onSave={saveAppt} onClose={closeModal}/>}
       {modal==="consult"  &&<ConsultModal  initial={editItem} members={data.members} onSave={saveConsult} onClose={closeModal}/>}
@@ -1164,22 +1455,22 @@ function CCard({c, member, onEdit, onDelete}) {
           {c.studies?.length>0&&(
             <div style={{marginTop:8}}>
               <div style={{fontSize:12,fontWeight:600,color:"#3D405B",marginBottom:6}}>Estudios realizados</div>
-              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
                 {c.studies.map((st,i)=>{
                   const isObj = typeof st==="object";
-                  const name  = isObj ? st.name : st;
-                  const link  = isObj ? st.link : null;
-                  const thumb = isObj ? st.thumb : null;
+                  const name  = isObj ? st.name  : st;
+                  const place = isObj ? st.place  : null;
+                  const link  = isObj ? (st.driveLink||st.link||st.url) : null;
                   return (
-                    <div key={i} style={{background:"#F5F3EF",border:"1px solid #EDE9E3",borderRadius:8,padding:"7px 10px",display:"flex",alignItems:"center",gap:10}}>
-                      {thumb && thumb!=="__PDF__"
-                        ? <img src={thumb} alt="" style={{width:40,height:40,borderRadius:5,objectFit:"cover",flexShrink:0,cursor:"pointer"}} onClick={()=>window.open(thumb,"_blank")}/>
-                        : <span style={{fontSize:20,flexShrink:0}}>{thumb==="__PDF__"?"📄":"📎"}</span>
-                      }
+                    <div key={i} style={{background:"#F5F3EF",border:"1px solid #EDE9E3",borderRadius:8,padding:"7px 10px",display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:18,flexShrink:0}}>🗂️</span>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:12,fontWeight:600,color:"#3D405B"}}>{name}</div>
-                        {link&&<a href={link} target="_blank" rel="noreferrer" style={{fontSize:11,color:"#4A90A4"}}>🔗 Abrir archivo</a>}
-                        {thumb&&!link&&<span style={{fontSize:10,color:"#aaa"}}>📁 Imagen guardada</span>}
+                        {place&&<div style={{fontSize:11,color:"#888"}}>📍 {place}</div>}
+                        {link
+                          ? <a href={link} target="_blank" rel="noreferrer" style={{fontSize:11,color:"#4A90A4"}}>Abrir en Google Drive →</a>
+                          : <span style={{fontSize:10,color:"#bbb"}}>Sin link adjunto</span>
+                        }
                       </div>
                     </div>
                   );
@@ -1198,7 +1489,7 @@ const F=({l,v,color})=><div style={{marginTop:8,fontSize:13,color:color||"#4a556
 //  MEMBER MODAL
 // ══════════════════════════════════════════
 function MemberModal({initial,onSave,onClose}) {
-  const [f,setF]=useState({id:initial?.id||null,name:initial?.name||"",avatar:initial?.avatar||"👤",color:initial?.color||COLORS[0],birthdate:initial?.birthdate||"",photo:initial?.photo||"",bloodType:initial?.bloodType||"",allergies:initial?.allergies||""});
+  const [f,setF]=useState({id:initial?.id||null,name:initial?.name||"",avatar:initial?.avatar||"👤",color:initial?.color||COLORS[0],birthdate:initial?.birthdate||"",photo:initial?.photo||"",bloodType:initial?.bloodType||"",allergies:initial?.allergies||"",sexo:initial?.sexo||"M"});
   const [photoErr, setPhotoErr] = useState("");
   const s=(k,v)=>setF(p=>({...p,[k]:v}));
 
@@ -1267,6 +1558,14 @@ function MemberModal({initial,onSave,onClose}) {
       </div>
       <Lb>Fecha de nacimiento</Lb>
       <input type="date" style={S.inp} value={f.birthdate} onChange={e=>s("birthdate",e.target.value)}/>
+      <Lb>Sexo biológico (para percentiles)</Lb>
+      <div style={{display:"flex",gap:8,marginBottom:4}}>
+        {[["M","👦 Masculino"],["F","👧 Femenino"]].map(([v,l])=>(
+          <button key={v} style={{flex:1,padding:9,border:"none",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:600,
+            background:f.sexo===v?f.color:"#EDE9E3",color:f.sexo===v?"#fff":"#3D405B"}}
+            onClick={()=>s("sexo",v)}>{l}</button>
+        ))}
+      </div>
       <div style={{display:"flex",gap:10}}>
         <div style={{flex:1}}>
           <Lb>Grupo sanguíneo</Lb>
@@ -1334,96 +1633,24 @@ function ConsultModal({initial,members,onSave,onClose}) {
   });
   const s=(k,v)=>setF(p=>({...p,[k]:v}));
 
-  // Study upload state
+  // Study state
   const [stName,     setStName]     = useState("");
+  const [stPlace,    setStPlace]    = useState("");
   const [stDriveLink,setStDriveLink]= useState("");
-  const [stUploading,setStUploading]= useState(false);
-  const [stProgress, setStProgress] = useState(0);
-  const [stPreview,  setStPreview]  = useState(null); // {url, type, thumb}
   const [stErr,      setStErr]      = useState("");
-
-  async function handleStudyFile(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setStErr("");
-    const isImg = file.type.startsWith("image/");
-    const isPdf = file.type === "application/pdf";
-    if (!isImg && !isPdf) { setStErr("Solo se aceptan imágenes o PDF"); return; }
-    if (!stName) setStName(file.name.replace(/\.[^.]+$/, ""));
-
-    setStUploading(true);
-    setStProgress(0);
-
-    try {
-      // Dynamic import of Firebase Storage (avoids top-level import issues)
-      const { storage } = await import("./firebase.js");
-      const { ref, uploadBytesResumable, getDownloadURL } = await import("firebase/storage");
-
-      const path = `studies/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
-      const storageRef = ref(storage, path);
-      const task = uploadBytesResumable(storageRef, file);
-
-      task.on("state_changed",
-        snap => setStProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
-        err  => { setStErr("Error al subir: " + err.message); setStUploading(false); },
-        async () => {
-          const downloadURL = await getDownloadURL(task.snapshot.ref);
-          // Generate thumbnail for images
-          let thumb = null;
-          if (isImg) {
-            await new Promise(res => {
-              const img = new Image();
-              img.onload = () => {
-                const canvas = document.createElement("canvas");
-                const MAX = 300;
-                let w=img.width, h=img.height;
-                if(w>h){ if(w>MAX){h=Math.round(h*MAX/w);w=MAX;} }
-                else   { if(h>MAX){w=Math.round(w*MAX/h);h=MAX;} }
-                canvas.width=w; canvas.height=h;
-                canvas.getContext("2d").drawImage(img,0,0,w,h);
-                thumb = canvas.toDataURL("image/jpeg", 0.7);
-                URL.revokeObjectURL(img.src);
-                res();
-              };
-              img.src = URL.createObjectURL(file);
-            });
-          }
-          setStPreview({ url: downloadURL, type: isPdf ? "pdf" : "image", thumb, path });
-          setStUploading(false);
-          setStProgress(100);
-        }
-      );
-    } catch(err) {
-      setStErr("Error al subir archivo: " + err.message);
-      setStUploading(false);
-    }
-  }
 
   function addStudy() {
     if (!stName.trim()) { setStErr("Ingresá un nombre para el estudio"); return; }
     s("studies", [...f.studies, {
       name:      stName.trim(),
-      url:       stPreview?.url   || "",
+      place:     stPlace.trim(),
       driveLink: stDriveLink.trim(),
-      type:      stPreview?.type  || (stDriveLink ? "drive" : "link"),
-      thumb:     stPreview?.thumb || "",
-      path:      stPreview?.path  || "",
+      type:      stDriveLink ? "drive" : "link",
     }]);
-    setStName(""); setStDriveLink(""); setStPreview(null); setStProgress(0); setStErr("");
+    setStName(""); setStPlace(""); setStDriveLink(""); setStErr("");
   }
 
-  async function removeStudy(i) {
-    const st = f.studies[i];
-    // Delete from Firebase Storage if it was uploaded there
-    if (st?.path) {
-      try {
-        const { storage } = await import("./firebase.js");
-        const { ref, deleteObject } = await import("firebase/storage");
-        await deleteObject(ref(storage, st.path));
-      } catch {}
-    }
-    s("studies", f.studies.filter((_,j)=>j!==i));
-  }
+  function removeStudy(i) { s("studies", f.studies.filter((_,j)=>j!==i)); }
 
   return (
     <Mdl title={f.id?"Editar consulta":"Nueva consulta médica"} onClose={onClose}>
@@ -1454,97 +1681,30 @@ function ConsultModal({initial,members,onSave,onClose}) {
 
       {/* ── ESTUDIOS ── */}
       <Lb>Estudios / Archivos</Lb>
-
       <div style={{background:"#F5F3EF",borderRadius:12,padding:12,marginBottom:8}}>
-
-        {/* Nombre */}
         <Lb>Nombre del estudio</Lb>
         <input style={S.inp} value={stName} onChange={e=>setStName(e.target.value)}
           placeholder="Ej: Hemograma, Rx de tórax, Eco abdominal..."/>
-
-        {/* OPCIÓN A — Subir directo */}
-        <div style={{background:"#fff",border:"1px solid #EDE9E3",borderRadius:10,padding:"10px 12px",marginBottom:8}}>
-          <div style={{fontSize:12,fontWeight:700,color:"#3D405B",marginBottom:8}}>
-            ⬆️ Opción A — Subir directo desde el celular
-          </div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <label style={{...S.attachBtn,flex:1,opacity:stUploading?.5:1,pointerEvents:stUploading?"none":"auto"}}>
-              🖼️ Imagen
-              <input type="file" accept="image/*" style={{display:"none"}} onChange={handleStudyFile}/>
-            </label>
-            <label style={{...S.attachBtn,flex:1,opacity:stUploading?.5:1,pointerEvents:stUploading?"none":"auto"}}>
-              📄 PDF
-              <input type="file" accept="application/pdf" style={{display:"none"}} onChange={handleStudyFile}/>
-            </label>
-            <label style={{...S.attachBtn,flex:1,opacity:stUploading?.5:1,pointerEvents:stUploading?"none":"auto"}}>
-              📷 Cámara
-              <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handleStudyFile}/>
-            </label>
-          </div>
-
-          {/* Barra de progreso */}
-          {stUploading && (
-            <div style={{marginTop:10}}>
-              <div style={{fontSize:12,color:"#3D6E9E",marginBottom:4}}>⬆️ Subiendo... {stProgress}%</div>
-              <div style={{height:6,background:"#EDE9E3",borderRadius:3,overflow:"hidden"}}>
-                <div style={{height:"100%",background:"#4A90A4",borderRadius:3,width:`${stProgress}%`,transition:"width .2s"}}/>
-              </div>
-            </div>
-          )}
-
-          {/* Preview post-subida */}
-          {stPreview && !stUploading && (
-            <div style={{background:"#F0FBF4",border:"1px solid #81B29A",borderRadius:8,padding:"8px 10px",marginTop:8,display:"flex",alignItems:"center",gap:10}}>
-              {stPreview.type==="image" && stPreview.thumb
-                ? <img src={stPreview.thumb} alt="" style={{width:44,height:44,borderRadius:6,objectFit:"cover",flexShrink:0}}/>
-                : <span style={{fontSize:26,flexShrink:0}}>📄</span>
-              }
-              <div style={{flex:1}}>
-                <div style={{fontSize:12,fontWeight:600,color:"#3D6B54"}}>✅ Subido — visible en ambos celulares</div>
-                <div style={{fontSize:10,color:"#aaa"}}>Guardado en Firebase Storage</div>
-              </div>
-              <button style={{...S.iBtnSm,color:"#E07A5F"}} onClick={()=>setStPreview(null)}>✕</button>
-            </div>
-          )}
+        <Lb>Lugar donde se realizó</Lb>
+        <input style={S.inp} value={stPlace} onChange={e=>setStPlace(e.target.value)}
+          placeholder="Ej: Hospital Italiano, Laboratorio Central, Diagnóstico Médico..."/>
+        <Lb>Link de Google Drive</Lb>
+        <div style={{background:"#EEF7FF",border:"1px solid #C3D8F5",borderRadius:8,padding:"8px 10px",marginBottom:8,fontSize:11,color:"#2C5F8A",lineHeight:1.6}}>
+          En Drive: abrí el archivo → 3 puntitos ⋮ → <em>Obtener link</em> → <em>Cualquier persona con el link</em> → Copiar link
         </div>
-
-        {/* OPCIÓN B — Link de Google Drive */}
-        <div style={{background:"#fff",border:"1px solid #EDE9E3",borderRadius:10,padding:"10px 12px",marginBottom:8}}>
-          <div style={{fontSize:12,fontWeight:700,color:"#3D405B",marginBottom:6}}>
-            🗂️ Opción B — Link de Google Drive
-          </div>
-          <div style={{fontSize:11,color:"#888",marginBottom:8,lineHeight:1.5}}>
-            En Drive: abrí el archivo → 3 puntitos ⋮ → <em>Obtener link</em> → <em>Cualquier persona con el link</em> → Copiar
-          </div>
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <input
-              style={{...S.inp,flex:1,marginBottom:0,
-                background:stDriveLink?"#F0FBF4":"#fff",
-                border:`1px solid ${stDriveLink?"#81B29A":"#EDE9E3"}`}}
-              value={stDriveLink}
-              onChange={e=>setStDriveLink(e.target.value)}
-              placeholder="https://drive.google.com/file/d/..."/>
-            {stDriveLink&&<span style={{fontSize:18}}>✅</span>}
-          </div>
-          {stDriveLink&&(
-            <a href={stDriveLink} target="_blank" rel="noreferrer"
-              style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:11,color:"#4A90A4",marginTop:6,textDecoration:"none",background:"#EEF7FF",padding:"4px 10px",borderRadius:16,border:"1px solid #C3D8F5"}}>
-              🔗 Probar link →
-            </a>
-          )}
+        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
+          <input style={{...S.inp,flex:1,marginBottom:0,background:stDriveLink?"#F0FBF4":"#fff",border:`1px solid ${stDriveLink?"#81B29A":"#EDE9E3"}`}}
+            value={stDriveLink} onChange={e=>setStDriveLink(e.target.value)}
+            placeholder="https://drive.google.com/file/d/..."/>
+          {stDriveLink&&<span style={{fontSize:18}}>✅</span>}
         </div>
-
-        {stErr && <div style={{fontSize:11,color:"#E07A5F",marginBottom:8}}>⚠️ {stErr}</div>}
-
-        <button
-          style={{...S.addBtn,width:"100%",borderRadius:10,padding:11,
-            opacity:(stName.trim()&&!stUploading)?1:0.5,
-            background:stUploading?"#aaa":"#3D405B"}}
-          onClick={addStudy}
-          disabled={!stName.trim()||stUploading}
-        >
-          {stUploading?"Esperá que termine la subida...":"+ Agregar estudio"}
-        </button>
+        {stDriveLink&&<a href={stDriveLink} target="_blank" rel="noreferrer"
+          style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:11,color:"#4A90A4",marginBottom:8,textDecoration:"none",background:"#EEF7FF",padding:"4px 10px",borderRadius:16,border:"1px solid #C3D8F5"}}>
+          🔗 Probar link →
+        </a>}
+        {stErr&&<div style={{fontSize:11,color:"#E07A5F",marginBottom:8}}>⚠️ {stErr}</div>}
+        <button style={{...S.addBtn,width:"100%",borderRadius:10,padding:11,opacity:stName.trim()?1:0.5}}
+          onClick={addStudy} disabled={!stName.trim()}>+ Agregar estudio</button>
       </div>
 
       {/* Lista de estudios ya agregados */}
@@ -1553,28 +1713,20 @@ function ConsultModal({initial,members,onSave,onClose}) {
           {f.studies.map((st,i)=>{
             const isObj = typeof st==="object";
             const name  = isObj ? st.name  : st;
-            const url   = isObj ? (st.url||st.link||st.driveLink) : null;
-            const type  = isObj ? st.type  : "link";
-            const thumb = isObj ? st.thumb : null;
-            const isDrive = url?.includes("drive.google.com");
+            const place = isObj ? st.place  : null;
+            const link  = isObj ? (st.driveLink||st.link||st.url) : null;
             return (
               <div key={i} style={{background:"#fff",border:"1px solid #EDE9E3",borderRadius:10,padding:"9px 12px",display:"flex",alignItems:"center",gap:10}}>
-                {thumb
-                  ? <img src={thumb} alt="" style={{width:46,height:46,borderRadius:6,objectFit:"cover",flexShrink:0,cursor:"pointer",border:"1px solid #EDE9E3"}} onClick={()=>window.open(url||thumb,"_blank")}/>
-                  : <div style={{width:42,height:42,borderRadius:8,
-                      background:isDrive?"#E8F4FE":type==="pdf"?"#FFF0F0":"#F0F7FF",
-                      display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>
-                      {isDrive?"🗂️":type==="pdf"?"📄":type==="image"?"🖼️":"📎"}
-                    </div>
-                }
+                <div style={{width:40,height:40,borderRadius:8,background:"#E8F4FE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>🗂️</div>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:600,color:"#3D405B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</div>
-                  {url
-                    ? <a href={url} target="_blank" rel="noreferrer"
+                  {place&&<div style={{fontSize:11,color:"#888",marginTop:1}}>📍 {place}</div>}
+                  {link
+                    ? <a href={link} target="_blank" rel="noreferrer"
                         style={{fontSize:11,color:"#4A90A4",display:"inline-flex",alignItems:"center",gap:3,marginTop:2,textDecoration:"none"}}>
-                        {isDrive?"🗂️ Google Drive":type==="pdf"?"📄 Abrir PDF":type==="image"?"🖼️ Ver imagen":"🔗 Abrir"}
+                        🗂️ Abrir en Google Drive
                       </a>
-                    : <span style={{fontSize:10,color:"#aaa"}}>Sin archivo adjunto</span>
+                    : <span style={{fontSize:10,color:"#aaa"}}>Sin link adjunto</span>
                   }
                 </div>
                 <button style={{...S.iBtnSm,color:"#E07A5F",flexShrink:0}} onClick={()=>removeStudy(i)}>🗑️</button>
@@ -1601,6 +1753,76 @@ function Mdl({title,children,onClose}) {
   );
 }
 const Lb=({children})=><label style={S.lbl}>{children}</label>;
+
+// ══════════════════════════════════════════
+//  MEASUREMENT MODAL
+// ══════════════════════════════════════════
+function MeasurementModal({ member, onSave, onClose }) {
+  const isChild = member.birthdate && Math.floor((Date.now()-new Date(member.birthdate).getTime())/(86400000*365.25)) < 18;
+  const [f, setF] = useState({ date: new Date().toISOString().split("T")[0], peso:"", talla:"", notes:"" });
+  const s=(k,v)=>setF(p=>({...p,[k]:v}));
+  const imc = f.peso&&f.talla ? calcIMC(f.peso,f.talla) : null;
+  const imcInfo = imcLabel(imc);
+  return (
+    <Mdl title="Registrar medición" onClose={onClose}>
+      <Lb>Fecha</Lb>
+      <input type="date" style={S.inp} value={f.date} onChange={e=>s("date",e.target.value)}/>
+      <div style={{display:"flex",gap:10}}>
+        <div style={{flex:1}}><Lb>Peso (kg)</Lb><input type="number" step="0.1" style={S.inp} value={f.peso} onChange={e=>s("peso",e.target.value)} placeholder="Ej: 25.5"/></div>
+        <div style={{flex:1}}><Lb>Talla (cm)</Lb><input type="number" step="0.1" style={S.inp} value={f.talla} onChange={e=>s("talla",e.target.value)} placeholder="Ej: 112"/></div>
+      </div>
+      {imc&&(
+        <div style={{background:imcInfo.color+"22",border:`1px solid ${imcInfo.color}44`,borderRadius:10,padding:"10px 14px",marginTop:8,display:"flex",alignItems:"center",gap:10}}>
+          <div style={{fontSize:24,fontWeight:700,color:imcInfo.color}}>{imc}</div>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:imcInfo.color}}>{imcInfo.label}</div>
+            <div style={{fontSize:11,color:"#888"}}>{isChild?"IMC calculado — referencia OMS":"Índice de Masa Corporal"}</div>
+          </div>
+        </div>
+      )}
+      {isChild&&(
+        <div style={{background:"#EEF7FF",borderRadius:10,padding:"8px 12px",marginTop:8,fontSize:11,color:"#2C5F8A",lineHeight:1.5}}>
+          ℹ️ Para niños se calcula el percentil según las tablas OMS. El resultado se muestra en la pestaña de salud.
+        </div>
+      )}
+      <Lb>Notas (opcional)</Lb>
+      <input style={S.inp} value={f.notes} onChange={e=>s("notes",e.target.value)} placeholder="Ej: Control anual, post-vacuna..."/>
+      <button style={S.saveBtn} onClick={()=>(f.peso||f.talla)&&onSave(f)}>Guardar medición</button>
+    </Mdl>
+  );
+}
+
+// ══════════════════════════════════════════
+//  CUSTOM VACCINE MODAL
+// ══════════════════════════════════════════
+function CustomVaccineModal({ member, onSave, onClose }) {
+  const [f, setF] = useState({ name:"", date: new Date().toISOString().split("T")[0], needsBooster:false, nextDate:"" });
+  const s=(k,v)=>setF(p=>({...p,[k]:v}));
+  return (
+    <Mdl title="Agregar vacuna extra" onClose={onClose}>
+      <div style={{background:"#F0F7FF",borderRadius:10,padding:"8px 12px",marginBottom:10,fontSize:11,color:"#2C5F8A",lineHeight:1.5}}>
+        Usá esta sección para vacunas que no están en el calendario oficial: COVID, antigripal anual, refuerzos indicados por el médico, vacunas de viaje, etc.
+      </div>
+      <Lb>Nombre de la vacuna</Lb>
+      <input style={S.inp} value={f.name} onChange={e=>s("name",e.target.value)} placeholder="Ej: COVID-19 (Pfizer), Antigripal 2025, Fiebre amarilla..."/>
+      <Lb>Fecha de colocación</Lb>
+      <input type="date" style={S.inp} value={f.date} onChange={e=>s("date",e.target.value)}/>
+      <Lb>¿Necesita otra dosis?</Lb>
+      <div style={{display:"flex",gap:8,marginBottom:8}}>
+        {[[true,"Sí"],[false,"No"]].map(([v,l])=>(
+          <button key={String(v)} style={{flex:1,padding:10,border:"none",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:600,
+            background:f.needsBooster===v?"#3D405B":"#EDE9E3",color:f.needsBooster===v?"#fff":"#3D405B"}}
+            onClick={()=>s("needsBooster",v)}>{l}</button>
+        ))}
+      </div>
+      {f.needsBooster&&<>
+        <Lb>Fecha de la próxima dosis</Lb>
+        <input type="date" style={S.inp} value={f.nextDate} onChange={e=>s("nextDate",e.target.value)}/>
+      </>}
+      <button style={S.saveBtn} onClick={()=>f.name&&f.date&&onSave(f)}>Guardar vacuna</button>
+    </Mdl>
+  );
+}
 
 // ══════════════════════════════════════════
 //  PDF EXPORT MODAL
@@ -1780,7 +2002,7 @@ const S = {
   heroSub: {margin:"4px 0 0",fontSize:12,color:"#aaa"},
   iBtn:    {background:"none",border:"none",fontSize:18,cursor:"pointer",padding:4},
   iBtnSm:  {background:"none",border:"none",fontSize:14,cursor:"pointer",padding:2},
-  tabs:    {display:"grid",gridTemplateColumns:"repeat(4,1fr)",background:"#EDE9E3",borderRadius:10,padding:3,gap:2,marginBottom:16},
+  tabs:    {display:"grid",gridTemplateColumns:"repeat(5,1fr)",background:"#EDE9E3",borderRadius:10,padding:3,gap:2,marginBottom:16},
   tabI:    {background:"none",border:"none",padding:"7px 0",borderRadius:8,cursor:"pointer",fontSize:11,color:"#999",textAlign:"center"},
   tabA:    {background:"#fff",border:"none",padding:"7px 0",borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:700,color:"#3D405B",boxShadow:"0 1px 4px rgba(0,0,0,.08)",textAlign:"center"},
   apptCard:{background:"#fff",borderRadius:10,marginBottom:8,padding:"12px 14px",display:"flex",alignItems:"flex-start",gap:10,boxShadow:"0 1px 5px rgba(0,0,0,.05)"},
