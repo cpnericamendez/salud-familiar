@@ -47,7 +47,7 @@ const VACCINE_SCHEDULE = [
 // ── Helpers ──
 const toISO  = d => d.toISOString().split("T")[0];
 const fmt    = s => { if(!s) return ""; const[y,m,d]=s.split("-"); return `${d}/${m}/${y}`; };
-const daysUntil = s => { if(!s) return null; const t=new Date(s); t.setHours(0,0,0,0); const n=new Date(); n.setHours(0,0,0,0); return Math.ceil((t-n)/86400000); };
+const daysUntil = s => { if(!s) return null; const t=new Date(s); t.setHours(0,0,0,0); const n=new Date(); n.setHours(0,0,0,0); return Math.round((t-n)/86400000); };
 const getAge = bd => { if(!bd) return null; return Math.floor((Date.now()-new Date(bd).getTime())/(86400000*365.25)); };
 const addMonths = (date,m) => { const d=new Date(date); d.setMonth(d.getMonth()+m); return d; };
 const vacKey = v => `${v.vaccine}||${v.dosis}`;
@@ -680,8 +680,12 @@ export default function App() {
     return list.sort((a,b)=>new Date(b.date)-new Date(a.date));
   },[data.consultations, memberId, search]);
 
-  const memberAppts = useMemo(()=>
-    data.appointments.filter(a=>a.memberId===memberId).sort((a,b)=>new Date(a.date)-new Date(b.date))
+  const memberAppts = useMemo(()=>{
+    const all = data.appointments.filter(a=>a.memberId===memberId);
+    const upcoming = all.filter(a=>daysUntil(a.date)>=0).sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const past     = all.filter(a=>daysUntil(a.date)<0).sort((a,b)=>new Date(b.date)-new Date(a.date));
+    return [...upcoming, ...past];
+  }
   ,[data.appointments, memberId]);
 
   const memberIllnesses = useMemo(()=>
@@ -728,6 +732,17 @@ export default function App() {
   const delMeasurement = (membId, id) => setDataTS(d => ({
     ...d, measurements: { ...d.measurements, [membId]: (d.measurements?.[membId]||[]).filter(x=>x.id!==id) }
   }));
+
+  // Antecedentes familiares CRUD
+  const saveAntecedentes = (membId, ant) => {
+    setDataTS(d => ({ ...d, antecedentes: { ...d.antecedentes, [membId]: ant } }));
+  };
+  const copyAntecedentes = (fromId, toId) => {
+    setDataTS(d => ({
+      ...d,
+      antecedentes: { ...d.antecedentes, [toId]: { ...(d.antecedentes?.[fromId] || {}) } }
+    }));
+  };
 
   // Custom vaccines CRUD
   const saveCustomVaccine = (membId, vac) => {
@@ -1005,7 +1020,7 @@ export default function App() {
             })()}
 
             <div style={S.tabs}>
-              {[["consultas","📋"],["turnos","📅"],["vacunas","💉"],["salud","📊"],["enfermedades","🤒"]].map(([k,ic])=>(
+              {[["consultas","📋"],["turnos","📅"],["vacunas","💉"],["crecimiento","📊"],["enfermedades","🤒"],["antecedentes","🧬"]].map(([k,ic])=>(
                 <button key={k} style={memberTab===k?S.tabA:S.tabI} onClick={()=>setMemberTab(k)}>
                   {ic} <span style={{fontSize:10,display:"block"}}>{k.charAt(0).toUpperCase()+k.slice(1)}</span>
                 </button>
@@ -1027,10 +1042,19 @@ export default function App() {
               <div style={S.toolbar}>
                 <button style={S.addBtn} onClick={()=>{setEditItem({memberId:member.id});setModal("appt");}}>+ Agregar turno</button>
               </div>
-              {memberAppts.length===0?<p style={S.empty}>Sin turnos cargados.</p>:memberAppts.map(a=>{
+              {memberAppts.length===0?<p style={S.empty}>Sin turnos cargados.</p>:memberAppts.map((a,idx)=>{
                 const days=daysUntil(a.date); const past=days<0;
                 const col=past?"#ccc":days===0?"#E07A5F":days<=3?"#C9A96E":"#81B29A";
+                // Show separator before first past appointment
+                const prevDays = idx>0 ? daysUntil(memberAppts[idx-1].date) : 0;
+                const showSep = past && idx>0 && prevDays>=0;
                 return (
+                  <>
+                  {showSep&&<div style={{display:"flex",alignItems:"center",gap:8,margin:"10px 0 6px"}}>
+                    <div style={{flex:1,height:1,background:"#EDE9E3"}}/>
+                    <span style={{fontSize:11,color:"#bbb",fontWeight:600}}>TURNOS PASADOS</span>
+                    <div style={{flex:1,height:1,background:"#EDE9E3"}}/>
+                  </div>}
                   <div key={a.id} style={{...S.apptCard,opacity:past?.65:1}}>
                     <div style={{...S.apptDot,background:col}}/>
                     <div style={{flex:1}}>
@@ -1047,6 +1071,7 @@ export default function App() {
                       <button style={S.iBtnSm} onClick={()=>delAppt(a.id)}>🗑️</button>
                     </div>
                   </div>
+                  </>
                 );
               })}
             </>}
@@ -1128,7 +1153,7 @@ export default function App() {
             })()}
 
             {/* SALUD — Peso, talla, IMC, percentiles */}
-            {memberTab==="salud"&&(()=>{
+            {memberTab==="crecimiento"&&(()=>{
               const isChild = member.birthdate && getAge(member.birthdate) < 18;
               const measurements = (data.measurements?.[member.id]||[]).sort((a,b)=>new Date(b.date)-new Date(a.date));
               const latest = measurements[0];
@@ -1206,6 +1231,59 @@ export default function App() {
               {memberIllnesses.length===0?<p style={S.empty}>Sin enfermedades registradas.</p>
                 :memberIllnesses.map(il=><IllnessCard key={il.id} il={il} onEdit={()=>{setEditItem(il);setModal("illness");}} onDelete={()=>delIllness(il.id)} onToggle={()=>toggleIllnessActive(il.id)}/>)}
             </>}
+
+            {/* ANTECEDENTES FAMILIARES */}
+            {memberTab==="antecedentes"&&(()=>{
+              const ant = data.antecedentes?.[member.id] || {};
+              const otherMembers = data.members.filter(m=>m.id!==member.id);
+              const FAMILIARES = [
+                { key:"madre",      label:"👩 Madre" },
+                { key:"padre",      label:"👨 Padre" },
+                { key:"abuelaMat",  label:"👵 Abuela materna" },
+                { key:"abueloMat",  label:"👴 Abuelo materno" },
+                { key:"abuelaPat",  label:"👵 Abuela paterna" },
+                { key:"abueloPat",  label:"👴 Abuelo paterno" },
+              ];
+              return <>
+                {/* Copy from another member */}
+                {otherMembers.length>0&&(
+                  <div style={{background:"#EEF7FF",border:"1px solid #C3D8F5",borderRadius:10,padding:"10px 14px",marginBottom:14}}>
+                    <div style={{fontSize:12,fontWeight:700,color:"#2C5F8A",marginBottom:8}}>
+                      📋 Copiar árbol genealógico de otro integrante
+                    </div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      {otherMembers.map(m=>(
+                        <button key={m.id}
+                          style={{background:"#fff",border:"1px solid #C3D8F5",borderRadius:20,padding:"6px 14px",fontSize:12,cursor:"pointer",fontWeight:600,color:"#2C5F8A"}}
+                          onClick={()=>{
+                            if(confirm(`¿Copiar los antecedentes de ${m.name} a ${member.name}? Se van a reemplazar los actuales.`)){
+                              copyAntecedentes(m.id, member.id);
+                            }
+                          }}>
+                          {m.avatar} Copiar de {m.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <p style={{fontSize:11,color:"#aaa",marginBottom:14}}>
+                  Cargá los antecedentes médicos de cada familiar. Se guarda automáticamente al salir del campo.
+                </p>
+
+                {FAMILIARES.map(({key,label})=>{
+                  const datos = ant[key] || {};
+                  return (
+                    <AntecedentesCard
+                      key={key}
+                      label={label}
+                      datos={datos}
+                      onSave={datos => saveAntecedentes(member.id, { ...ant, [key]: datos })}
+                    />
+                  );
+                })}
+              </>;
+            })()}
           </div>
         )}
       </main>
@@ -1955,6 +2033,64 @@ function PDFExportModal({ member, consultations, illnesses, appointments, applie
     </div>
   );
 }
+
+// ══════════════════════════════════════════
+//  ANTECEDENTES CARD — edición inline
+// ══════════════════════════════════════════
+function AntecedentesCard({ label, datos, onSave }) {
+  const [open, setOpen]   = useState(false);
+  const [f, setF]         = useState({ nombre:datos.nombre||"", diagnosticos:datos.diagnosticos||"", medicamentos:datos.medicamentos||"", notas:datos.notas||"" });
+  const hasData = f.nombre||f.diagnosticos||f.medicamentos||f.notas;
+  const s = (k,v) => setF(p=>({...p,[k]:v}));
+
+  function handleBlur() {
+    onSave(f);
+  }
+
+  return (
+    <div style={{background:"#fff",borderRadius:12,marginBottom:8,boxShadow:"0 1px 5px rgba(0,0,0,.05)",overflow:"hidden"}}>
+      <div style={{padding:"12px 14px",display:"flex",alignItems:"center",cursor:"pointer",gap:10}} onClick={()=>setOpen(o=>!o)}>
+        <span style={{fontSize:20}}>{label.split(" ")[0]}</span>
+        <div style={{flex:1}}>
+          <div style={{fontSize:14,fontWeight:600,color:"#3D405B"}}>{label.split(" ").slice(1).join(" ")}</div>
+          {hasData&&!open&&(
+            <div style={{fontSize:11,color:"#888",marginTop:2}}>
+              {f.nombre&&<span>{f.nombre} · </span>}
+              {f.diagnosticos&&<span>{f.diagnosticos.slice(0,40)}{f.diagnosticos.length>40?"…":""}</span>}
+            </div>
+          )}
+          {!hasData&&<div style={{fontSize:11,color:"#bbb"}}>Sin datos cargados</div>}
+        </div>
+        <span style={{color:"#bbb",fontSize:12}}>{open?"▲":"▼"}</span>
+      </div>
+      {open&&(
+        <div style={{padding:"0 14px 14px",borderTop:"1px solid #f5f0eb"}}>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:"#aaa",marginTop:10,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"}}>Nombre completo</label>
+          <input style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",borderRadius:8,border:"1px solid #EDE9E3",fontSize:14,outline:"none"}}
+            value={f.nombre} onChange={e=>s("nombre",e.target.value)} onBlur={handleBlur}
+            placeholder="Ej: María González"/>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:"#aaa",marginTop:10,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"}}>Diagnósticos / enfermedades</label>
+          <textarea style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",borderRadius:8,border:"1px solid #EDE9E3",fontSize:13,outline:"none",resize:"vertical",fontFamily:"inherit"}}
+            rows={3} value={f.diagnosticos} onChange={e=>s("diagnosticos",e.target.value)} onBlur={handleBlur}
+            placeholder="Ej: Diabetes tipo 2, hipertensión arterial, asma..."/>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:"#aaa",marginTop:10,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"}}>Medicamentos actuales</label>
+          <textarea style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",borderRadius:8,border:"1px solid #EDE9E3",fontSize:13,outline:"none",resize:"vertical",fontFamily:"inherit"}}
+            rows={2} value={f.medicamentos} onChange={e=>s("medicamentos",e.target.value)} onBlur={handleBlur}
+            placeholder="Ej: Metformina 500mg, Enalapril 10mg..."/>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:"#aaa",marginTop:10,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"}}>Notas adicionales</label>
+          <textarea style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",borderRadius:8,border:"1px solid #EDE9E3",fontSize:13,outline:"none",resize:"vertical",fontFamily:"inherit"}}
+            rows={2} value={f.notas} onChange={e=>s("notas",e.target.value)} onBlur={handleBlur}
+            placeholder="Ej: Falleció de infarto, antecedentes cardíacos..."/>
+          <button style={{marginTop:10,background:"#3D405B",color:"#fff",border:"none",borderRadius:8,padding:"9px 20px",fontSize:13,fontWeight:600,cursor:"pointer",width:"100%"}}
+            onClick={()=>{onSave(f);setOpen(false);}}>
+            Guardar
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const S = {
   app:     {minHeight:"100vh",background:"#FAF8F5",fontFamily:"'DM Sans',sans-serif",color:"#3D405B"},
   header:  {background:"#fff",borderBottom:"1px solid #EDE9E3",position:"sticky",top:0,zIndex:100},
@@ -2002,7 +2138,7 @@ const S = {
   heroSub: {margin:"4px 0 0",fontSize:12,color:"#aaa"},
   iBtn:    {background:"none",border:"none",fontSize:18,cursor:"pointer",padding:4},
   iBtnSm:  {background:"none",border:"none",fontSize:14,cursor:"pointer",padding:2},
-  tabs:    {display:"grid",gridTemplateColumns:"repeat(5,1fr)",background:"#EDE9E3",borderRadius:10,padding:3,gap:2,marginBottom:16},
+  tabs:    {display:"grid",gridTemplateColumns:"repeat(6,1fr)",background:"#EDE9E3",borderRadius:10,padding:3,gap:2,marginBottom:16},
   tabI:    {background:"none",border:"none",padding:"7px 0",borderRadius:8,cursor:"pointer",fontSize:11,color:"#999",textAlign:"center"},
   tabA:    {background:"#fff",border:"none",padding:"7px 0",borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:700,color:"#3D405B",boxShadow:"0 1px 4px rgba(0,0,0,.08)",textAlign:"center"},
   apptCard:{background:"#fff",borderRadius:10,marginBottom:8,padding:"12px 14px",display:"flex",alignItems:"flex-start",gap:10,boxShadow:"0 1px 5px rgba(0,0,0,.05)"},
