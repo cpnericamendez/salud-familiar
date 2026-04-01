@@ -47,7 +47,21 @@ const VACCINE_SCHEDULE = [
 // ── Helpers ──
 const toISO  = d => d.toISOString().split("T")[0];
 const fmt    = s => { if(!s) return ""; const[y,m,d]=s.split("-"); return `${d}/${m}/${y}`; };
-const daysUntil = s => { if(!s) return null; const t=new Date(s); t.setHours(0,0,0,0); const n=new Date(); n.setHours(0,0,0,0); return Math.round((t-n)/86400000); };
+const localToday = () => {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`;
+};
+const daysUntil = s => {
+  if(!s) return null;
+  const today = localToday();
+  if(s === today) return 0;
+  // Parse both as local midnight to avoid UTC offset issues
+  const [ty,tm,td] = today.split("-").map(Number);
+  const [sy,sm,sd] = s.split("-").map(Number);
+  const t0 = new Date(ty,tm-1,td);
+  const t1 = new Date(sy,sm-1,sd);
+  return Math.round((t1-t0)/86400000);
+};
 const getAge = bd => { if(!bd) return null; return Math.floor((Date.now()-new Date(bd).getTime())/(86400000*365.25)); };
 const addMonths = (date,m) => { const d=new Date(date); d.setMonth(d.getMonth()+m); return d; };
 const vacKey = v => `${v.vaccine}||${v.dosis}`;
@@ -1149,6 +1163,43 @@ export default function App() {
                     </div>
                   );
                 })}
+
+                {/* ── VACUNAS EXTRA MANUALES ── */}
+                <div style={{marginTop:20,paddingTop:16,borderTop:"2px solid #EDE9E3"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:"#3D405B"}}>💉 Vacunas extra</div>
+                      <div style={{fontSize:11,color:"#aaa"}}>COVID, antigripal anual, refuerzos, viajes...</div>
+                    </div>
+                    <button style={{...S.addBtn,padding:"6px 14px",fontSize:12}} onClick={()=>setModal("customVac")}>+ Agregar</button>
+                  </div>
+                  {(data.customVaccines?.[member.id]||[]).length===0
+                    ? <p style={{...S.empty,textAlign:"left",padding:"8px 0",fontSize:12}}>Sin vacunas extra cargadas.</p>
+                    : (data.customVaccines?.[member.id]||[])
+                        .sort((a,b)=>new Date(b.date)-new Date(a.date))
+                        .map(v=>{
+                          const nextDays = v.nextDate ? daysUntil(v.nextDate) : null;
+                          const isOverdue = nextDays!==null && nextDays<0;
+                          const isSoon = nextDays!==null && nextDays>=0 && nextDays<=30;
+                          return (
+                            <div key={v.id} style={{background:"#fff",border:`1px solid ${isOverdue?"#F8BCBC":isSoon?"#F2CC8F":"#EDE9E3"}`,borderRadius:10,padding:"10px 12px",marginBottom:6,display:"flex",alignItems:"flex-start",gap:10}}>
+                              <span style={{fontSize:20,flexShrink:0}}>💉</span>
+                              <div style={{flex:1}}>
+                                <div style={{fontSize:13,fontWeight:600,color:"#3D405B"}}>{v.name}</div>
+                                <div style={{fontSize:11,color:"#888"}}>Aplicada: {fmt(v.date)}</div>
+                                {v.nextDate&&(
+                                  <div style={{fontSize:11,fontWeight:600,marginTop:2,color:isOverdue?"#E07A5F":isSoon?"#C9A96E":"#5B8C5A"}}>
+                                    Próxima dosis: {fmt(v.nextDate)}
+                                    {nextDays===0?" — HOY":nextDays===1?" — MAÑANA":isOverdue?` — VENCIDA (${Math.abs(nextDays)}d)`:isSoon?` — en ${nextDays} días`:""}
+                                  </div>
+                                )}
+                              </div>
+                              <button style={{...S.iBtnSm,color:"#E07A5F"}} onClick={()=>delCustomVaccine(member.id,v.id)}>🗑️</button>
+                            </div>
+                          );
+                        })
+                  }
+                </div>
               </>;
             })()}
 
@@ -1187,6 +1238,78 @@ export default function App() {
                         <div style={{fontSize:9,color:"#aaa"}}>Percentil peso</div>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Growth chart for children */}
+                {isChild && measurements.length >= 2 && (
+                  <div style={{background:"#fff",borderRadius:12,padding:14,marginBottom:14,boxShadow:"0 1px 5px rgba(0,0,0,.05)"}}>
+                    <div style={{fontSize:13,fontWeight:700,color:"#3D405B",marginBottom:12}}>📈 Curva de crecimiento</div>
+                    <div style={{overflowX:"auto"}}>
+                      <svg viewBox={`0 0 400 200`} style={{width:"100%",minWidth:300,height:"auto"}}>
+                        {/* Grid */}
+                        {[0,25,50,75,100].map(y=>(
+                          <g key={y}>
+                            <line x1="40" y1={10+y*1.8} x2="390" y2={10+y*1.8} stroke="#f0ede8" strokeWidth="1"/>
+                          </g>
+                        ))}
+                        {/* Y axis labels (peso kg) */}
+                        {(()=>{
+                          const weights = measurements.map(m=>parseFloat(m.peso)).filter(Boolean);
+                          const minW = Math.max(0, Math.floor(Math.min(...weights)-2));
+                          const maxW = Math.ceil(Math.max(...weights)+2);
+                          const range = maxW-minW;
+                          const sorted = [...measurements].filter(m=>m.peso&&m.talla).sort((a,b)=>new Date(a.date)-new Date(b.date));
+                          if(sorted.length<2) return null;
+                          const ages = sorted.map(m=>Math.floor((new Date(m.date)-new Date(member.birthdate))/(86400000*30.44)));
+                          const minAge = Math.min(...ages); const maxAge = Math.max(...ages);
+                          const ageRange = maxAge-minAge || 1;
+                          const toX = age => 40 + ((age-minAge)/ageRange)*350;
+                          const toY = w => 190 - ((parseFloat(w)-minW)/range)*180;
+                          return (
+                            <g>
+                              {/* Peso line */}
+                              <polyline
+                                points={sorted.map((m,i)=>`${toX(ages[i])},${toY(m.peso)}`).join(" ")}
+                                fill="none" stroke="#E07A5F" strokeWidth="2.5" strokeLinejoin="round"/>
+                              {/* Talla line (scaled) */}
+                              {sorted[0].talla&&(()=>{
+                                const heights = sorted.map(m=>parseFloat(m.talla)).filter(Boolean);
+                                const minH = Math.floor(Math.min(...heights)-5);
+                                const maxH = Math.ceil(Math.max(...heights)+5);
+                                const hRange = maxH-minH||1;
+                                const toYh = h => 190 - ((parseFloat(h)-minH)/hRange)*180;
+                                return (
+                                  <polyline
+                                    points={sorted.filter(m=>m.talla).map((m,i)=>`${toX(ages[i])},${toYh(m.talla)}`).join(" ")}
+                                    fill="none" stroke="#4A90A4" strokeWidth="2.5" strokeDasharray="5,3" strokeLinejoin="round"/>
+                                );
+                              })()}
+                              {/* Dots */}
+                              {sorted.map((m,i)=>(
+                                <circle key={i} cx={toX(ages[i])} cy={toY(m.peso)} r="4" fill="#E07A5F"/>
+                              ))}
+                              {/* Age labels */}
+                              {sorted.map((m,i)=>(
+                                <text key={i} x={toX(ages[i])} y="198" textAnchor="middle" fontSize="8" fill="#aaa">
+                                  {ages[i]<24?`${ages[i]}m`:`${Math.round(ages[i]/12)}a`}
+                                </text>
+                              ))}
+                            </g>
+                          );
+                        })()}
+                      </svg>
+                    </div>
+                    <div style={{display:"flex",gap:16,marginTop:8,fontSize:11}}>
+                      <span style={{display:"flex",alignItems:"center",gap:4}}><span style={{width:16,height:3,background:"#E07A5F",display:"inline-block",borderRadius:2}}/> Peso (kg)</span>
+                      <span style={{display:"flex",alignItems:"center",gap:4}}><span style={{width:16,height:3,background:"#4A90A4",display:"inline-block",borderRadius:2,borderTop:"2px dashed #4A90A4"}}/> Talla (cm)</span>
+                    </div>
+                    <p style={{fontSize:10,color:"#bbb",marginTop:6}}>Cargá más mediciones para ver la evolución completa de la curva.</p>
+                  </div>
+                )}
+                {isChild && measurements.length < 2 && measurements.length > 0 && (
+                  <div style={{background:"#EEF7FF",borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#2C5F8A"}}>
+                    📈 Cargá al menos 2 mediciones para ver el gráfico de curva de crecimiento.
                   </div>
                 )}
 
@@ -1239,10 +1362,13 @@ export default function App() {
               const FAMILIARES = [
                 { key:"madre",      label:"👩 Madre" },
                 { key:"padre",      label:"👨 Padre" },
+                { key:"hermanos",   label:"👦 Hermanos / Hermanas" },
                 { key:"abuelaMat",  label:"👵 Abuela materna" },
                 { key:"abueloMat",  label:"👴 Abuelo materno" },
+                { key:"tiosMat",    label:"🧑 Tíos / Tías maternos" },
                 { key:"abuelaPat",  label:"👵 Abuela paterna" },
                 { key:"abueloPat",  label:"👴 Abuelo paterno" },
+                { key:"tiosPat",    label:"🧑 Tíos / Tías paternos" },
               ];
               return <>
                 {/* Copy from another member */}
@@ -2035,17 +2161,40 @@ function PDFExportModal({ member, consultations, illnesses, appointments, applie
 }
 
 // ══════════════════════════════════════════
-//  ANTECEDENTES CARD — edición inline
+//  ANTECEDENTES CARD — múltiples enfermedades
 // ══════════════════════════════════════════
 function AntecedentesCard({ label, datos, onSave }) {
-  const [open, setOpen]   = useState(false);
-  const [f, setF]         = useState({ nombre:datos.nombre||"", diagnosticos:datos.diagnosticos||"", medicamentos:datos.medicamentos||"", notas:datos.notas||"" });
-  const hasData = f.nombre||f.diagnosticos||f.medicamentos||f.notas;
-  const s = (k,v) => setF(p=>({...p,[k]:v}));
+  const [open, setOpen] = useState(false);
+  // datos = { nombre, notas, condiciones: [{id, enfermedad, medicamentos}] }
+  const [nombre,    setNombre]    = useState(datos.nombre||"");
+  const [notas,     setNotas]     = useState(datos.notas||"");
+  const [condiciones, setCondiciones] = useState(datos.condiciones||[]);
+  const hasData = nombre || condiciones.length > 0;
 
-  function handleBlur() {
-    onSave(f);
+  function save(n, no, conds) {
+    onSave({ nombre:n, notas:no, condiciones:conds });
   }
+  function addCondicion() {
+    const updated = [...condiciones, { id:Date.now(), enfermedad:"", medicamentos:"" }];
+    setCondiciones(updated);
+    save(nombre, notas, updated);
+  }
+  function updateCond(id, key, val) {
+    const updated = condiciones.map(c => c.id===id ? {...c,[key]:val} : c);
+    setCondiciones(updated);
+  }
+  function saveCond(id, key, val) {
+    const updated = condiciones.map(c => c.id===id ? {...c,[key]:val} : c);
+    setCondiciones(updated);
+    save(nombre, notas, updated);
+  }
+  function delCond(id) {
+    const updated = condiciones.filter(c => c.id!==id);
+    setCondiciones(updated);
+    save(nombre, notas, updated);
+  }
+  const inpStyle = {width:"100%",boxSizing:"border-box",padding:"9px 12px",borderRadius:8,border:"1px solid #EDE9E3",fontSize:13,outline:"none",fontFamily:"inherit"};
+  const lblStyle = {display:"block",fontSize:11,fontWeight:600,color:"#aaa",marginTop:10,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"};
 
   return (
     <div style={{background:"#fff",borderRadius:12,marginBottom:8,boxShadow:"0 1px 5px rgba(0,0,0,.05)",overflow:"hidden"}}>
@@ -2055,8 +2204,8 @@ function AntecedentesCard({ label, datos, onSave }) {
           <div style={{fontSize:14,fontWeight:600,color:"#3D405B"}}>{label.split(" ").slice(1).join(" ")}</div>
           {hasData&&!open&&(
             <div style={{fontSize:11,color:"#888",marginTop:2}}>
-              {f.nombre&&<span>{f.nombre} · </span>}
-              {f.diagnosticos&&<span>{f.diagnosticos.slice(0,40)}{f.diagnosticos.length>40?"…":""}</span>}
+              {nombre&&<span>{nombre}</span>}
+              {condiciones.length>0&&<span style={{marginLeft:nombre?6:0,color:"#C9A96E"}}>· {condiciones.length} condición{condiciones.length>1?"es":""}</span>}
             </div>
           )}
           {!hasData&&<div style={{fontSize:11,color:"#bbb"}}>Sin datos cargados</div>}
@@ -2065,24 +2214,52 @@ function AntecedentesCard({ label, datos, onSave }) {
       </div>
       {open&&(
         <div style={{padding:"0 14px 14px",borderTop:"1px solid #f5f0eb"}}>
-          <label style={{display:"block",fontSize:11,fontWeight:600,color:"#aaa",marginTop:10,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"}}>Nombre completo</label>
-          <input style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",borderRadius:8,border:"1px solid #EDE9E3",fontSize:14,outline:"none"}}
-            value={f.nombre} onChange={e=>s("nombre",e.target.value)} onBlur={handleBlur}
+          <label style={lblStyle}>Nombre completo</label>
+          <input style={inpStyle} value={nombre}
+            onChange={e=>setNombre(e.target.value)}
+            onBlur={e=>save(e.target.value, notas, condiciones)}
             placeholder="Ej: María González"/>
-          <label style={{display:"block",fontSize:11,fontWeight:600,color:"#aaa",marginTop:10,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"}}>Diagnósticos / enfermedades</label>
-          <textarea style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",borderRadius:8,border:"1px solid #EDE9E3",fontSize:13,outline:"none",resize:"vertical",fontFamily:"inherit"}}
-            rows={3} value={f.diagnosticos} onChange={e=>s("diagnosticos",e.target.value)} onBlur={handleBlur}
-            placeholder="Ej: Diabetes tipo 2, hipertensión arterial, asma..."/>
-          <label style={{display:"block",fontSize:11,fontWeight:600,color:"#aaa",marginTop:10,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"}}>Medicamentos actuales</label>
-          <textarea style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",borderRadius:8,border:"1px solid #EDE9E3",fontSize:13,outline:"none",resize:"vertical",fontFamily:"inherit"}}
-            rows={2} value={f.medicamentos} onChange={e=>s("medicamentos",e.target.value)} onBlur={handleBlur}
-            placeholder="Ej: Metformina 500mg, Enalapril 10mg..."/>
-          <label style={{display:"block",fontSize:11,fontWeight:600,color:"#aaa",marginTop:10,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"}}>Notas adicionales</label>
-          <textarea style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",borderRadius:8,border:"1px solid #EDE9E3",fontSize:13,outline:"none",resize:"vertical",fontFamily:"inherit"}}
-            rows={2} value={f.notas} onChange={e=>s("notas",e.target.value)} onBlur={handleBlur}
+
+          {/* Lista de condiciones */}
+          {condiciones.length>0&&(
+            <div style={{marginTop:12}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#3D405B",marginBottom:8}}>
+                🏥 Enfermedades / diagnósticos
+              </div>
+              {condiciones.map((c,i)=>(
+                <div key={c.id} style={{background:"#FAF8F5",border:"1px solid #EDE9E3",borderRadius:10,padding:"10px 12px",marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                    <span style={{fontSize:12,fontWeight:600,color:"#3D405B"}}>Condición {i+1}</span>
+                    <button style={{background:"none",border:"none",color:"#E07A5F",cursor:"pointer",fontSize:13}} onClick={()=>delCond(c.id)}>✕ Eliminar</button>
+                  </div>
+                  <label style={lblStyle}>Enfermedad / diagnóstico</label>
+                  <input style={inpStyle} value={c.enfermedad}
+                    onChange={e=>updateCond(c.id,"enfermedad",e.target.value)}
+                    onBlur={e=>saveCond(c.id,"enfermedad",e.target.value)}
+                    placeholder="Ej: Diabetes tipo 2, Hipertensión..."/>
+                  <label style={lblStyle}>Medicamentos para esta condición</label>
+                  <textarea style={{...inpStyle,resize:"vertical"}} rows={2}
+                    value={c.medicamentos}
+                    onChange={e=>updateCond(c.id,"medicamentos",e.target.value)}
+                    onBlur={e=>saveCond(c.id,"medicamentos",e.target.value)}
+                    placeholder="Ej: Metformina 500mg, Enalapril 10mg..."/>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button style={{width:"100%",marginTop:8,padding:"8px",background:"#EDE9E3",color:"#3D405B",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600}}
+            onClick={addCondicion}>
+            + Agregar enfermedad / diagnóstico
+          </button>
+
+          <label style={lblStyle}>Notas adicionales</label>
+          <textarea style={{...inpStyle,resize:"vertical"}} rows={2} value={notas}
+            onChange={e=>setNotas(e.target.value)}
+            onBlur={e=>save(nombre, e.target.value, condiciones)}
             placeholder="Ej: Falleció de infarto, antecedentes cardíacos..."/>
           <button style={{marginTop:10,background:"#3D405B",color:"#fff",border:"none",borderRadius:8,padding:"9px 20px",fontSize:13,fontWeight:600,cursor:"pointer",width:"100%"}}
-            onClick={()=>{onSave(f);setOpen(false);}}>
+            onClick={()=>{save(nombre,notas,condiciones);setOpen(false);}}>
             Guardar
           </button>
         </div>
