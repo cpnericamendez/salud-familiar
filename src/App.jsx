@@ -998,6 +998,11 @@ export default function App() {
                 <h1 style={S.heroName}>{member.name}</h1>
                 {member.birthdate&&<p style={S.heroSub}>{fmt(member.birthdate)} · {getAge(member.birthdate)} años</p>}
                 {member.bloodType&&<p style={{...S.heroSub,marginTop:2}}>🩸 {member.bloodType}{member.allergies?` · ⚠️ ${member.allergies}`:""}</p>}
+                {member.sexo==="F"&&(member.embarazos||member.primeraMenstruacion)&&(
+                  <p style={{...S.heroSub,marginTop:2}}>
+                    🌸 {member.embarazos?`${member.embarazos} embarazo${member.embarazos>1?"s":""}`:""}{member.partosTermino?` · ${member.partosTermino} a término`:""}{member.tipoParto?` · ${member.tipoParto}`:""}
+                  </p>
+                )}
               </div>
               <button style={S.iBtn} onClick={()=>{setEditItem(member);setModal("member");}}>✏️</button>
               <button style={{...S.iBtn,color:"#E07A5F"}} onClick={()=>deleteMember(member.id)}>🗑️</button>
@@ -1081,6 +1086,18 @@ export default function App() {
                       {a.notes&&<div style={S.apptNote}>{a.notes}</div>}
                     </div>
                     <div style={{display:"flex",gap:3}}>
+                      {past&&<button style={{...S.iBtnSm,fontSize:12,background:"#F2CC8F33",border:"1px solid #C9A96E",borderRadius:6,padding:"2px 6px",color:"#7D5A30",whiteSpace:"nowrap"}}
+                        title="Registrar lo que pasó en esta consulta"
+                        onClick={()=>{
+                          setEditItem({
+                            memberId:a.memberId,
+                            date:a.date,
+                            specialist:a.specialist||"",
+                            specialty:"",
+                            reason:a.title||"",
+                          });
+                          setModal("consult");
+                        }}>📋 Consulta</button>}
                       <button style={S.iBtnSm} onClick={()=>{setEditItem(a);setModal("appt");}}>✏️</button>
                       <button style={S.iBtnSm} onClick={()=>delAppt(a.id)}>🗑️</button>
                     </div>
@@ -1329,7 +1346,7 @@ export default function App() {
                       return (
                         <div key={m.id||i} style={{background:"#fff",borderRadius:10,padding:"10px 14px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 1px 5px rgba(0,0,0,.05)"}}>
                           <div style={{flex:1}}>
-                            <div style={{fontSize:13,fontWeight:600,color:"#3D405B"}}>{fmt(m.date)}</div>
+                            <div style={{fontSize:13,fontWeight:600,color:"#3D405B"}}>{fmt(m.date)}{m.ageLabel&&<span style={{fontSize:11,color:"#4A90A4",marginLeft:8}}>({m.ageLabel})</span>}</div>
                             <div style={{fontSize:12,color:"#888"}}>
                               {m.peso&&`${m.peso} kg`}{m.talla&&` · ${m.talla} cm`}
                               {ic&&<span style={{color:ii.color,marginLeft:6,fontWeight:600}}>IMC {ic} — {ii.label}</span>}
@@ -1362,13 +1379,13 @@ export default function App() {
               const FAMILIARES = [
                 { key:"madre",      label:"👩 Madre" },
                 { key:"padre",      label:"👨 Padre" },
-                { key:"hermanos",   label:"👦 Hermanos / Hermanas" },
+                { key:"hermanos",   label:"👦 Hermanos / Hermanas", multiple:true },
                 { key:"abuelaMat",  label:"👵 Abuela materna" },
                 { key:"abueloMat",  label:"👴 Abuelo materno" },
-                { key:"tiosMat",    label:"🧑 Tíos / Tías maternos" },
+                { key:"tiosMat",    label:"🧑 Tíos / Tías maternos", multiple:true },
                 { key:"abuelaPat",  label:"👵 Abuela paterna" },
                 { key:"abueloPat",  label:"👴 Abuelo paterno" },
-                { key:"tiosPat",    label:"🧑 Tíos / Tías paternos" },
+                { key:"tiosPat",    label:"🧑 Tíos / Tías paternos", multiple:true },
               ];
               return <>
                 {/* Copy from another member */}
@@ -1397,12 +1414,14 @@ export default function App() {
                   Cargá los antecedentes médicos de cada familiar. Se guarda automáticamente al salir del campo.
                 </p>
 
-                {FAMILIARES.map(({key,label})=>{
+                {FAMILIARES.map((item)=>{
+                  const {key,label} = item;
                   const datos = ant[key] || {};
                   return (
                     <AntecedentesCard
                       key={key}
                       label={label}
+                      multiple={!!item.multiple}
                       datos={datos}
                       onSave={datos => saveAntecedentes(member.id, { ...ant, [key]: datos })}
                     />
@@ -1693,7 +1712,7 @@ const F=({l,v,color})=><div style={{marginTop:8,fontSize:13,color:color||"#4a556
 //  MEMBER MODAL
 // ══════════════════════════════════════════
 function MemberModal({initial,onSave,onClose}) {
-  const [f,setF]=useState({id:initial?.id||null,name:initial?.name||"",avatar:initial?.avatar||"👤",color:initial?.color||COLORS[0],birthdate:initial?.birthdate||"",photo:initial?.photo||"",bloodType:initial?.bloodType||"",allergies:initial?.allergies||"",sexo:initial?.sexo||"M"});
+  const [f,setF]=useState({id:initial?.id||null,name:initial?.name||"",avatar:initial?.avatar||"👤",color:initial?.color||COLORS[0],birthdate:initial?.birthdate||"",photo:initial?.photo||"",bloodType:initial?.bloodType||"",allergies:initial?.allergies||"",sexo:initial?.sexo||"M",primeraMenstruacion:initial?.primeraMenstruacion||"",embarazos:initial?.embarazos||"",partosTermino:initial?.partosTermino||"",tipoParto:initial?.tipoParto||"",complicacionesEmbarazo:initial?.complicacionesEmbarazo||""});
   const [photoErr, setPhotoErr] = useState("");
   const s=(k,v)=>setF(p=>({...p,[k]:v}));
 
@@ -1780,6 +1799,30 @@ function MemberModal({initial,onSave,onClose}) {
         </div>
         <div style={{flex:1}}><Lb>Alergias conocidas</Lb><input style={S.inp} value={f.allergies} onChange={e=>s("allergies",e.target.value)} placeholder="Ej: Penicilina, Polen..."/></div>
       </div>
+      {/* Datos ginecológicos — solo para mujeres */}
+      {f.sexo==="F"&&<>
+        <div style={{marginTop:12,marginBottom:4,paddingTop:12,borderTop:"1px solid #EDE9E3"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#3D405B",marginBottom:4}}>🌸 Datos ginecológicos</div>
+        </div>
+        <Lb>Fecha primera menstruación</Lb>
+        <input type="date" style={S.inp} value={f.primeraMenstruacion||""} onChange={e=>s("primeraMenstruacion",e.target.value)}/>
+        <div style={{display:"flex",gap:10}}>
+          <div style={{flex:1}}><Lb>Cantidad de embarazos</Lb><input type="number" min="0" style={S.inp} value={f.embarazos||""} onChange={e=>s("embarazos",e.target.value)} placeholder="0"/></div>
+          <div style={{flex:1}}><Lb>Partos a término</Lb><input type="number" min="0" style={S.inp} value={f.partosTermino||""} onChange={e=>s("partosTermino",e.target.value)} placeholder="0"/></div>
+        </div>
+        <Lb>Tipo de parto</Lb>
+        <div style={{display:"flex",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+          {["Natural","Cesárea","Ambos","No aplica"].map(t=>(
+            <button key={t} style={{padding:"7px 12px",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600,
+              background:f.tipoParto===t?"#3D405B":"#EDE9E3",color:f.tipoParto===t?"#fff":"#3D405B"}}
+              onClick={()=>s("tipoParto",t)}>{t}</button>
+          ))}
+        </div>
+        <Lb>Complicaciones en embarazos</Lb>
+        <textarea style={S.ta} rows={2} value={f.complicacionesEmbarazo||""} onChange={e=>s("complicacionesEmbarazo",e.target.value)}
+          placeholder="Ej: Diabetes gestacional, preeclampsia, parto prematuro..."/>
+      </>}
+
       <button style={S.saveBtn} onClick={()=>f.name&&onSave(f)}>Guardar</button>
     </Mdl>
   );
@@ -1967,10 +2010,20 @@ function MeasurementModal({ member, onSave, onClose }) {
   const s=(k,v)=>setF(p=>({...p,[k]:v}));
   const imc = f.peso&&f.talla ? calcIMC(f.peso,f.talla) : null;
   const imcInfo = imcLabel(imc);
+  const ageAtMeas = member.birthdate && f.date ? (()=>{
+    const [by,bm,bd] = member.birthdate.split("-").map(Number);
+    const [my,mm,md] = f.date.split("-").map(Number);
+    const months = (my-by)*12+(mm-bm)-(md<bd?1:0);
+    if(months<0) return null;
+    if(months<24) return `${months} meses`;
+    const years=Math.floor(months/12); const rem=months%12;
+    return rem>0?`${years} años ${rem} meses`:`${years} años`;
+  })() : null;
   return (
     <Mdl title="Registrar medición" onClose={onClose}>
-      <Lb>Fecha</Lb>
+      <Lb>Fecha de la medición</Lb>
       <input type="date" style={S.inp} value={f.date} onChange={e=>s("date",e.target.value)}/>
+      {ageAtMeas&&<div style={{background:"#EEF7FF",border:"1px solid #C3D8F5",borderRadius:8,padding:"6px 12px",marginBottom:6,fontSize:12,color:"#2C5F8A",fontWeight:600}}>📅 Edad en esta medición: {ageAtMeas}</div>}
       <div style={{display:"flex",gap:10}}>
         <div style={{flex:1}}><Lb>Peso (kg)</Lb><input type="number" step="0.1" style={S.inp} value={f.peso} onChange={e=>s("peso",e.target.value)} placeholder="Ej: 25.5"/></div>
         <div style={{flex:1}}><Lb>Talla (cm)</Lb><input type="number" step="0.1" style={S.inp} value={f.talla} onChange={e=>s("talla",e.target.value)} placeholder="Ej: 112"/></div>
@@ -1991,7 +2044,7 @@ function MeasurementModal({ member, onSave, onClose }) {
       )}
       <Lb>Notas (opcional)</Lb>
       <input style={S.inp} value={f.notes} onChange={e=>s("notes",e.target.value)} placeholder="Ej: Control anual, post-vacuna..."/>
-      <button style={S.saveBtn} onClick={()=>(f.peso||f.talla)&&onSave(f)}>Guardar medición</button>
+      <button style={S.saveBtn} onClick={()=>(f.peso||f.talla)&&onSave({...f,ageLabel:ageAtMeas||""})}>Guardar medición</button>
     </Mdl>
   );
 }
@@ -2161,9 +2214,102 @@ function PDFExportModal({ member, consultations, illnesses, appointments, applie
 }
 
 // ══════════════════════════════════════════
+//  ANTECEDENTES MULTIPLE — lista de personas
+// ══════════════════════════════════════════
+function AntecedentesMultiple({ label, datos, onSave }) {
+  const [expanded, setExpanded] = useState(null); // index of expanded person
+
+  function addPerson() {
+    const updated = [...datos, { id:Date.now(), nombre:"", notas:"", condiciones:[] }];
+    onSave(updated);
+    setExpanded(updated.length-1);
+  }
+  function updatePerson(idx, personData) {
+    const updated = datos.map((p,i) => i===idx ? {...p,...personData} : p);
+    onSave(updated);
+  }
+  function delPerson(idx) {
+    if(!confirm("¿Eliminar este familiar?")) return;
+    onSave(datos.filter((_,i)=>i!==idx));
+  }
+
+  const inpStyle = {width:"100%",boxSizing:"border-box",padding:"9px 12px",borderRadius:8,border:"1px solid #EDE9E3",fontSize:13,outline:"none",fontFamily:"inherit"};
+  const lblStyle = {display:"block",fontSize:11,fontWeight:600,color:"#aaa",marginTop:10,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"};
+
+  return (
+    <div style={{background:"#fff",borderRadius:12,marginBottom:8,boxShadow:"0 1px 5px rgba(0,0,0,.05)",overflow:"hidden"}}>
+      <div style={{padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:20}}>{label.split(" ")[0]}</span>
+        <div style={{flex:1}}>
+          <div style={{fontSize:14,fontWeight:600,color:"#3D405B"}}>{label.split(" ").slice(1).join(" ")}</div>
+          <div style={{fontSize:11,color:"#888"}}>{datos.length>0?`${datos.length} persona${datos.length>1?"s":""}  cargada${datos.length>1?"s":""}` : "Sin datos cargados"}</div>
+        </div>
+        <button style={{background:"#3D405B",color:"#fff",border:"none",borderRadius:20,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer"}} onClick={addPerson}>+ Agregar</button>
+      </div>
+      {datos.map((persona,idx)=>(
+        <div key={persona.id||idx} style={{borderTop:"1px solid #f5f0eb"}}>
+          <div style={{padding:"10px 14px",display:"flex",alignItems:"center",cursor:"pointer",gap:8}} onClick={()=>setExpanded(expanded===idx?null:idx)}>
+            <span style={{fontSize:14}}>👤</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:600,color:"#3D405B"}}>{persona.nombre||`${label.split(" ").slice(1).join(" ")} ${idx+1}`}</div>
+              {persona.condiciones?.length>0&&<div style={{fontSize:11,color:"#C9A96E"}}>{persona.condiciones.length} condición{persona.condiciones.length>1?"es":""}</div>}
+            </div>
+            <button style={{background:"none",border:"none",color:"#E07A5F",cursor:"pointer",fontSize:12,marginRight:4}} onClick={e=>{e.stopPropagation();delPerson(idx);}}>✕</button>
+            <span style={{color:"#bbb",fontSize:11}}>{expanded===idx?"▲":"▼"}</span>
+          </div>
+          {expanded===idx&&(
+            <div style={{padding:"0 14px 14px"}}>
+              <label style={lblStyle}>Nombre completo</label>
+              <input style={inpStyle} value={persona.nombre||""} placeholder="Ej: Carlos García"
+                onChange={e=>updatePerson(idx,{nombre:e.target.value})}/>
+              <PersonCondiciones
+                condiciones={persona.condiciones||[]}
+                onUpdate={conds=>updatePerson(idx,{condiciones:conds})}
+                inpStyle={inpStyle} lblStyle={lblStyle}/>
+              <label style={lblStyle}>Notas</label>
+              <textarea style={{...inpStyle,resize:"vertical"}} rows={2} value={persona.notas||""} placeholder="Observaciones..."
+                onChange={e=>updatePerson(idx,{notas:e.target.value})}/>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Shared conditions editor used by both card types
+function PersonCondiciones({ condiciones, onUpdate, inpStyle, lblStyle }) {
+  function add() { onUpdate([...condiciones, {id:Date.now(),enfermedad:"",medicamentos:""}]); }
+  function upd(id,k,v){ onUpdate(condiciones.map(c=>c.id===id?{...c,[k]:v}:c)); }
+  function del(id){ onUpdate(condiciones.filter(c=>c.id!==id)); }
+  return (
+    <div style={{marginTop:8}}>
+      {condiciones.length>0&&<div style={{fontSize:12,fontWeight:700,color:"#3D405B",marginBottom:6}}>🏥 Enfermedades / diagnósticos</div>}
+      {condiciones.map((c,i)=>(
+        <div key={c.id} style={{background:"#FAF8F5",border:"1px solid #EDE9E3",borderRadius:10,padding:"10px 12px",marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+            <span style={{fontSize:12,fontWeight:600,color:"#3D405B"}}>Condición {i+1}</span>
+            <button style={{background:"none",border:"none",color:"#E07A5F",cursor:"pointer",fontSize:12}} onClick={()=>del(c.id)}>✕</button>
+          </div>
+          <label style={lblStyle}>Enfermedad / diagnóstico</label>
+          <input style={inpStyle} value={c.enfermedad||""} onChange={e=>upd(c.id,"enfermedad",e.target.value)} placeholder="Ej: Diabetes tipo 2..."/>
+          <label style={lblStyle}>Medicamentos</label>
+          <textarea style={{...inpStyle,resize:"vertical"}} rows={2} value={c.medicamentos||""} onChange={e=>upd(c.id,"medicamentos",e.target.value)} placeholder="Ej: Metformina 500mg..."/>
+        </div>
+      ))}
+      <button style={{width:"100%",padding:"7px",background:"#EDE9E3",color:"#3D405B",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600}} onClick={add}>
+        + Agregar enfermedad / diagnóstico
+      </button>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════
 //  ANTECEDENTES CARD — múltiples enfermedades
 // ══════════════════════════════════════════
-function AntecedentesCard({ label, datos, onSave }) {
+function AntecedentesCard({ label, datos, onSave, multiple=false }) {
+  // multiple=true: datos is array of people; multiple=false: single person object
+  if(multiple) return <AntecedentesMultiple label={label} datos={Array.isArray(datos)?datos:[]} onSave={onSave}/>;
   const [open, setOpen] = useState(false);
   // datos = { nombre, notas, condiciones: [{id, enfermedad, medicamentos}] }
   const [nombre,    setNombre]    = useState(datos.nombre||"");
@@ -2174,25 +2320,10 @@ function AntecedentesCard({ label, datos, onSave }) {
   function save(n, no, conds) {
     onSave({ nombre:n, notas:no, condiciones:conds });
   }
-  function addCondicion() {
-    const updated = [...condiciones, { id:Date.now(), enfermedad:"", medicamentos:"" }];
-    setCondiciones(updated);
-    save(nombre, notas, updated);
-  }
-  function updateCond(id, key, val) {
-    const updated = condiciones.map(c => c.id===id ? {...c,[key]:val} : c);
-    setCondiciones(updated);
-  }
-  function saveCond(id, key, val) {
-    const updated = condiciones.map(c => c.id===id ? {...c,[key]:val} : c);
-    setCondiciones(updated);
-    save(nombre, notas, updated);
-  }
-  function delCond(id) {
-    const updated = condiciones.filter(c => c.id!==id);
-    setCondiciones(updated);
-    save(nombre, notas, updated);
-  }
+  
+  
+  
+  
   const inpStyle = {width:"100%",boxSizing:"border-box",padding:"9px 12px",borderRadius:8,border:"1px solid #EDE9E3",fontSize:13,outline:"none",fontFamily:"inherit"};
   const lblStyle = {display:"block",fontSize:11,fontWeight:600,color:"#aaa",marginTop:10,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"};
 
@@ -2220,38 +2351,10 @@ function AntecedentesCard({ label, datos, onSave }) {
             onBlur={e=>save(e.target.value, notas, condiciones)}
             placeholder="Ej: María González"/>
 
-          {/* Lista de condiciones */}
-          {condiciones.length>0&&(
-            <div style={{marginTop:12}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#3D405B",marginBottom:8}}>
-                🏥 Enfermedades / diagnósticos
-              </div>
-              {condiciones.map((c,i)=>(
-                <div key={c.id} style={{background:"#FAF8F5",border:"1px solid #EDE9E3",borderRadius:10,padding:"10px 12px",marginBottom:8}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                    <span style={{fontSize:12,fontWeight:600,color:"#3D405B"}}>Condición {i+1}</span>
-                    <button style={{background:"none",border:"none",color:"#E07A5F",cursor:"pointer",fontSize:13}} onClick={()=>delCond(c.id)}>✕ Eliminar</button>
-                  </div>
-                  <label style={lblStyle}>Enfermedad / diagnóstico</label>
-                  <input style={inpStyle} value={c.enfermedad}
-                    onChange={e=>updateCond(c.id,"enfermedad",e.target.value)}
-                    onBlur={e=>saveCond(c.id,"enfermedad",e.target.value)}
-                    placeholder="Ej: Diabetes tipo 2, Hipertensión..."/>
-                  <label style={lblStyle}>Medicamentos para esta condición</label>
-                  <textarea style={{...inpStyle,resize:"vertical"}} rows={2}
-                    value={c.medicamentos}
-                    onChange={e=>updateCond(c.id,"medicamentos",e.target.value)}
-                    onBlur={e=>saveCond(c.id,"medicamentos",e.target.value)}
-                    placeholder="Ej: Metformina 500mg, Enalapril 10mg..."/>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <button style={{width:"100%",marginTop:8,padding:"8px",background:"#EDE9E3",color:"#3D405B",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600}}
-            onClick={addCondicion}>
-            + Agregar enfermedad / diagnóstico
-          </button>
+          <PersonCondiciones
+            condiciones={condiciones}
+            onUpdate={conds=>{setCondiciones(conds);save(nombre,notas,conds);}}
+            inpStyle={inpStyle} lblStyle={lblStyle}/>
 
           <label style={lblStyle}>Notas adicionales</label>
           <textarea style={{...inpStyle,resize:"vertical"}} rows={2} value={notas}
