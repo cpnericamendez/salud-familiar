@@ -1206,8 +1206,8 @@ export default function App() {
                                 <div style={{fontSize:11,color:"#888"}}>Aplicada: {fmt(v.date)}</div>
                                 {v.nextDate&&(
                                   <div style={{fontSize:11,fontWeight:600,marginTop:2,color:isOverdue?"#E07A5F":isSoon?"#C9A96E":"#5B8C5A"}}>
-                                    Próxima dosis: {fmt(v.nextDate)}
-                                    {nextDays===0?" — HOY":nextDays===1?" — MAÑANA":isOverdue?` — VENCIDA (${Math.abs(nextDays)}d)`:isSoon?` — en ${nextDays} días`:""}
+                                    {isOverdue?"⚠️ Próxima dosis vencida":"Próxima dosis"}: {fmt(v.nextDate)}
+                                    {nextDays===0?" — HOY":nextDays===1?" — MAÑANA":isOverdue?` (hace ${Math.abs(nextDays)} días)`:isSoon?` — en ${nextDays} días`:""}
                                   </div>
                                 )}
                               </div>
@@ -1227,8 +1227,11 @@ export default function App() {
               const latest = measurements[0];
               const imc = latest ? calcIMC(latest.peso, latest.talla) : null;
               const imcInfo = imcLabel(imc);
-              const ageM = member.birthdate ? Math.floor((Date.now()-new Date(member.birthdate).getTime())/(86400000*30.44)) : 0;
-              const pctInfo = (isChild && latest?.peso) ? getPercentile(latest.peso, ageM, member.sexo||"M") : null;
+              // Use measurement DATE (not today) to calculate age for percentile
+              const ageMAtLatest = (member.birthdate && latest?.date) ?
+                Math.floor((new Date(latest.date)-new Date(member.birthdate))/(86400000*30.44)) : 0;
+              const pctInfo = (isChild && latest?.peso && ageMAtLatest>0) ?
+                getPercentile(latest.peso, ageMAtLatest, member.sexo||"M") : null;
               return <>
                 {/* Latest stats */}
                 {latest && (
@@ -1388,26 +1391,22 @@ export default function App() {
                 { key:"tiosPat",    label:"🧑 Tíos / Tías paternos", multiple:true },
               ];
               return <>
-                {/* Copy from another member */}
+                {/* Smart copy — with relationship mapping */}
                 {otherMembers.length>0&&(
-                  <div style={{background:"#EEF7FF",border:"1px solid #C3D8F5",borderRadius:10,padding:"10px 14px",marginBottom:14}}>
-                    <div style={{fontSize:12,fontWeight:700,color:"#2C5F8A",marginBottom:8}}>
-                      📋 Copiar árbol genealógico de otro integrante
-                    </div>
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      {otherMembers.map(m=>(
-                        <button key={m.id}
-                          style={{background:"#fff",border:"1px solid #C3D8F5",borderRadius:20,padding:"6px 14px",fontSize:12,cursor:"pointer",fontWeight:600,color:"#2C5F8A"}}
-                          onClick={()=>{
-                            if(confirm(`¿Copiar los antecedentes de ${m.name} a ${member.name}? Se van a reemplazar los actuales.`)){
-                              copyAntecedentes(m.id, member.id);
-                            }
-                          }}>
-                          {m.avatar} Copiar de {m.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <SmartCopyPanel
+                    currentMember={member}
+                    otherMembers={otherMembers}
+                    allAntecedentes={data.antecedentes||{}}
+                    onCopy={(fromId, fieldMap)=>{
+                      const fromAnt = data.antecedentes?.[fromId]||{};
+                      const currentAnt = data.antecedentes?.[member.id]||{};
+                      const merged = {...currentAnt};
+                      Object.entries(fieldMap).forEach(([fromKey, toKey])=>{
+                        if(fromAnt[fromKey]) merged[toKey] = fromAnt[fromKey];
+                      });
+                      saveAntecedentes(member.id, merged);
+                    }}
+                  />
                 )}
 
                 <p style={{fontSize:11,color:"#aaa",marginBottom:14}}>
@@ -2214,6 +2213,86 @@ function PDFExportModal({ member, consultations, illnesses, appointments, applie
 }
 
 // ══════════════════════════════════════════
+//  SMART COPY PANEL — cross-member relationship mapping
+// ══════════════════════════════════════════
+const RELATIONSHIP_MAPS = [
+  {
+    label: "Copiar TODO (mismos antecedentes)",
+    desc: "Ej: hermanos que comparten madre, padre y abuelos",
+    map: {madre:"madre",padre:"padre",abuelaMat:"abuelaMat",abueloMat:"abueloMat",abuelaPat:"abuelaPat",abueloPat:"abueloPat",hermanos:"hermanos",tiosMat:"tiosMat",tiosPat:"tiosPat"}
+  },
+  {
+    label: "La abuela materna del niño = Madre del padre",
+    desc: "Ej: los datos de 'Abuela materna' del hijo van a 'Madre' del padre",
+    map: {abuelaMat:"madre", abueloMat:"padre", abuelaPat:"abuelaMat", abueloPat:"abueloMat"}
+  },
+  {
+    label: "La abuela paterna del niño = Madre del padre",
+    desc: "Ej: los datos de 'Abuela paterna' del hijo van a 'Madre' del padre",
+    map: {abuelaPat:"madre", abueloPat:"padre", abuelaMat:"abuelasMat", abueloMat:"abueloMat"}
+  },
+  {
+    label: "Los padres del niño = Datos propios del padre/madre",
+    desc: "Ej: copiar la info de 'Madre' del hijo a los datos del integrante padre",
+    map: {madre:"madre", padre:"padre"}
+  },
+];
+
+function SmartCopyPanel({ currentMember, otherMembers, allAntecedentes, onCopy }) {
+  const [open, setOpen] = useState(false);
+  const [fromId, setFromId] = useState(otherMembers[0]?.id||null);
+  const [mapIdx, setMapIdx] = useState(0);
+
+  return (
+    <div style={{background:"#EEF7FF",border:"1px solid #C3D8F5",borderRadius:10,marginBottom:14}}>
+      <div style={{padding:"10px 14px",display:"flex",alignItems:"center",cursor:"pointer",gap:8}} onClick={()=>setOpen(o=>!o)}>
+        <span style={{fontSize:16}}>📋</span>
+        <div style={{flex:1}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#2C5F8A"}}>Copiar antecedentes de otro integrante</div>
+          <div style={{fontSize:11,color:"#888"}}>Con mapeo de relación familiar</div>
+        </div>
+        <span style={{fontSize:11,color:"#aaa"}}>{open?"▲":"▼"}</span>
+      </div>
+      {open&&(
+        <div style={{padding:"0 14px 14px",borderTop:"1px solid #C3D8F5"}}>
+          <div style={{fontSize:11,fontWeight:600,color:"#aaa",marginTop:10,marginBottom:4,textTransform:"uppercase"}}>Copiar desde</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+            {otherMembers.map(m=>(
+              <button key={m.id}
+                style={{padding:"6px 12px",border:`2px solid ${fromId===m.id?"#3D405B":"#EDE9E3"}`,borderRadius:20,cursor:"pointer",fontSize:12,fontWeight:600,background:fromId===m.id?"#3D405B":"#fff",color:fromId===m.id?"#fff":"#3D405B"}}
+                onClick={()=>setFromId(m.id)}>
+                {m.avatar} {m.name}
+              </button>
+            ))}
+          </div>
+          <div style={{fontSize:11,fontWeight:600,color:"#aaa",marginBottom:4,textTransform:"uppercase"}}>Tipo de relación</div>
+          {RELATIONSHIP_MAPS.map((rm,i)=>(
+            <div key={i}
+              style={{padding:"8px 12px",borderRadius:8,cursor:"pointer",marginBottom:4,border:`1px solid ${mapIdx===i?"#3D405B":"#EDE9E3"}`,background:mapIdx===i?"#F5F3EF":"#fff"}}
+              onClick={()=>setMapIdx(i)}>
+              <div style={{fontSize:12,fontWeight:600,color:"#3D405B"}}>{rm.label}</div>
+              <div style={{fontSize:11,color:"#888"}}>{rm.desc}</div>
+            </div>
+          ))}
+          <button
+            style={{width:"100%",marginTop:10,padding:"10px",background:"#3D405B",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:600}}
+            onClick={()=>{
+              if(!fromId) return;
+              const fromName = otherMembers.find(m=>m.id===fromId)?.name||"otro integrante";
+              if(confirm(`¿Copiar antecedentes de ${fromName} a ${currentMember.name} usando la relación "${RELATIONSHIP_MAPS[mapIdx].label}"?`)){
+                onCopy(fromId, RELATIONSHIP_MAPS[mapIdx].map);
+                setOpen(false);
+              }
+            }}>
+            Copiar ahora
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════
 //  ANTECEDENTES MULTIPLE — lista de personas
 // ══════════════════════════════════════════
 function AntecedentesMultiple({ label, datos, onSave }) {
@@ -2252,7 +2331,11 @@ function AntecedentesMultiple({ label, datos, onSave }) {
             <span style={{fontSize:14}}>👤</span>
             <div style={{flex:1}}>
               <div style={{fontSize:13,fontWeight:600,color:"#3D405B"}}>{persona.nombre||`${label.split(" ").slice(1).join(" ")} ${idx+1}`}</div>
-              {persona.condiciones?.length>0&&<div style={{fontSize:11,color:"#C9A96E"}}>{persona.condiciones.length} condición{persona.condiciones.length>1?"es":""}</div>}
+              {(()=>{
+                const c=persona.condiciones;
+                const enf = Array.isArray(c)?c.map(x=>x.enfermedad||"").filter(Boolean).join(", "):(c?.enfermedades||"");
+                return enf ? <div style={{fontSize:11,color:"#C9A96E",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:160}}>{enf}</div> : null;
+              })()}
             </div>
             <button style={{background:"none",border:"none",color:"#E07A5F",cursor:"pointer",fontSize:12,marginRight:4}} onClick={e=>{e.stopPropagation();delPerson(idx);}}>✕</button>
             <span style={{color:"#bbb",fontSize:11}}>{expanded===idx?"▲":"▼"}</span>
@@ -2277,29 +2360,50 @@ function AntecedentesMultiple({ label, datos, onSave }) {
   );
 }
 
-// Shared conditions editor used by both card types
+// Shared conditions editor — single text box for diseases + optional meds
 function PersonCondiciones({ condiciones, onUpdate, inpStyle, lblStyle }) {
-  function add() { onUpdate([...condiciones, {id:Date.now(),enfermedad:"",medicamentos:""}]); }
-  function upd(id,k,v){ onUpdate(condiciones.map(c=>c.id===id?{...c,[k]:v}:c)); }
-  function del(id){ onUpdate(condiciones.filter(c=>c.id!==id)); }
+  // Flatten existing condiciones into single text for backwards compat
+  const existingText = Array.isArray(condiciones)
+    ? condiciones.map(c=>c.enfermedad||"").filter(Boolean).join(", ")
+    : (condiciones?.enfermedades||"");
+  const existingMeds = Array.isArray(condiciones)
+    ? condiciones.map(c=>c.medicamentos||"").filter(Boolean).join("; ")
+    : (condiciones?.medicamentos||"");
+
+  const [enf,    setEnf]    = useState(existingText);
+  const [tomaMed,setTomaMed]= useState(existingMeds ? true : false);
+  const [meds,   setMeds]   = useState(existingMeds);
+
+  function save(e, t, m) {
+    onUpdate({ enfermedades: e, tomaMedicacion: t, medicamentos: m });
+  }
+
   return (
-    <div style={{marginTop:8}}>
-      {condiciones.length>0&&<div style={{fontSize:12,fontWeight:700,color:"#3D405B",marginBottom:6}}>🏥 Enfermedades / diagnósticos</div>}
-      {condiciones.map((c,i)=>(
-        <div key={c.id} style={{background:"#FAF8F5",border:"1px solid #EDE9E3",borderRadius:10,padding:"10px 12px",marginBottom:8}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-            <span style={{fontSize:12,fontWeight:600,color:"#3D405B"}}>Condición {i+1}</span>
-            <button style={{background:"none",border:"none",color:"#E07A5F",cursor:"pointer",fontSize:12}} onClick={()=>del(c.id)}>✕</button>
-          </div>
-          <label style={lblStyle}>Enfermedad / diagnóstico</label>
-          <input style={inpStyle} value={c.enfermedad||""} onChange={e=>upd(c.id,"enfermedad",e.target.value)} placeholder="Ej: Diabetes tipo 2..."/>
-          <label style={lblStyle}>Medicamentos</label>
-          <textarea style={{...inpStyle,resize:"vertical"}} rows={2} value={c.medicamentos||""} onChange={e=>upd(c.id,"medicamentos",e.target.value)} placeholder="Ej: Metformina 500mg..."/>
-        </div>
-      ))}
-      <button style={{width:"100%",padding:"7px",background:"#EDE9E3",color:"#3D405B",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600}} onClick={add}>
-        + Agregar enfermedad / diagnóstico
-      </button>
+    <div style={{marginTop:10}}>
+      <label style={lblStyle}>Enfermedades / diagnósticos</label>
+      <textarea style={{...inpStyle,resize:"vertical"}} rows={3}
+        value={enf}
+        onChange={e=>setEnf(e.target.value)}
+        onBlur={e=>save(e.target.value,tomaMed,meds)}
+        placeholder="Ej: Diabetes tipo 2, hipertensión arterial, asma, colesterol alto..."/>
+      <label style={lblStyle}>¿Toma medicación?</label>
+      <div style={{display:"flex",gap:8,marginBottom:6}}>
+        {[[true,"Sí"],[false,"No"]].map(([v,l])=>(
+          <button key={String(v)} style={{flex:1,padding:"8px",border:"none",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:600,
+            background:tomaMed===v?"#3D405B":"#EDE9E3",color:tomaMed===v?"#fff":"#3D405B"}}
+            onClick={()=>{setTomaMed(v);save(enf,v,meds);}}>
+            {l}
+          </button>
+        ))}
+      </div>
+      {tomaMed&&<>
+        <label style={lblStyle}>Medicamentos (nombre, dosis y cantidad por día)</label>
+        <textarea style={{...inpStyle,resize:"vertical"}} rows={3}
+          value={meds}
+          onChange={e=>setMeds(e.target.value)}
+          onBlur={e=>save(enf,tomaMed,e.target.value)}
+          placeholder="Ej: Metformina 500mg 2 veces/día, Enalapril 10mg 1 vez/día..."/>
+      </>}
     </div>
   );
 }
