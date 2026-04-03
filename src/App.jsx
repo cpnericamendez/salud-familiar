@@ -1198,20 +1198,40 @@ export default function App() {
                           const nextDays = v.nextDate ? daysUntil(v.nextDate) : null;
                           const isOverdue = nextDays!==null && nextDays<0;
                           const isSoon = nextDays!==null && nextDays>=0 && nextDays<=30;
+                          const boosterApplied = v.boosterDate; // date when booster was actually given
+                          const showOverdue = isOverdue && !boosterApplied;
+                          const showSoonFinal = isSoon && !boosterApplied;
                           return (
-                            <div key={v.id} style={{background:"#fff",border:`1px solid ${isOverdue?"#F8BCBC":isSoon?"#F2CC8F":"#EDE9E3"}`,borderRadius:10,padding:"10px 12px",marginBottom:6,display:"flex",alignItems:"flex-start",gap:10}}>
+                            <div key={v.id} style={{background:"#fff",border:`1px solid ${showOverdue?"#F8BCBC":showSoonFinal?"#F2CC8F":"#EDE9E3"}`,borderRadius:10,padding:"10px 12px",marginBottom:6,display:"flex",alignItems:"flex-start",gap:10}}>
                               <span style={{fontSize:20,flexShrink:0}}>💉</span>
                               <div style={{flex:1}}>
                                 <div style={{fontSize:13,fontWeight:600,color:"#3D405B"}}>{v.name}</div>
-                                <div style={{fontSize:11,color:"#888"}}>Aplicada: {fmt(v.date)}</div>
-                                {v.nextDate&&(
-                                  <div style={{fontSize:11,fontWeight:600,marginTop:2,color:isOverdue?"#E07A5F":isSoon?"#C9A96E":"#5B8C5A"}}>
-                                    {isOverdue?"⚠️ Próxima dosis vencida":"Próxima dosis"}: {fmt(v.nextDate)}
-                                    {nextDays===0?" — HOY":nextDays===1?" — MAÑANA":isOverdue?` (hace ${Math.abs(nextDays)} días)`:isSoon?` — en ${nextDays} días`:""}
+                                <div style={{fontSize:11,color:"#888"}}>1ª dosis: {fmt(v.date)}</div>
+                                {v.nextDate&&!boosterApplied&&(
+                                  <div style={{fontSize:11,fontWeight:600,marginTop:2,color:showOverdue?"#E07A5F":showSoonFinal?"#C9A96E":"#5B8C5A"}}>
+                                    {showOverdue?"⚠️ Refuerzo pendiente":"Refuerzo"}: {fmt(v.nextDate)}
+                                    {nextDays===0?" — HOY":nextDays===1?" — MAÑANA":showOverdue?` (hace ${Math.abs(nextDays)} días)`:showSoonFinal?` — en ${nextDays} días`:""}
+                                  </div>
+                                )}
+                                {boosterApplied&&(
+                                  <div style={{fontSize:11,fontWeight:600,color:"#5B8C5A",marginTop:2}}>
+                                    ✅ Refuerzo aplicado: {fmt(boosterApplied)}
                                   </div>
                                 )}
                               </div>
-                              <button style={{...S.iBtnSm,color:"#E07A5F"}} onClick={()=>delCustomVaccine(member.id,v.id)}>🗑️</button>
+                              <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
+                                {v.nextDate&&!boosterApplied&&(
+                                  <button style={{fontSize:10,background:"#E8F5EC",border:"1px solid #81B29A",color:"#3D6B54",borderRadius:12,padding:"3px 8px",cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}
+                                    onClick={()=>{
+                                      const d = prompt("Fecha en que se aplicó el refuerzo (AAAA-MM-DD):", new Date().toISOString().split("T")[0]);
+                                      if(d) saveCustomVaccine(member.id,{...v,boosterDate:d});
+                                    }}>
+                                    ✓ Refuerzo aplicado
+                                  </button>
+                                )}
+                                <button style={{...S.iBtnSm,fontSize:12}} onClick={()=>{setEditItem(v);setModal("customVac");}}>✏️</button>
+                                <button style={{...S.iBtnSm,color:"#E07A5F"}} onClick={()=>delCustomVaccine(member.id,v.id)}>🗑️</button>
+                              </div>
                             </div>
                           );
                         })
@@ -1227,9 +1247,14 @@ export default function App() {
               const latest = measurements[0];
               const imc = latest ? calcIMC(latest.peso, latest.talla) : null;
               const imcInfo = imcLabel(imc);
-              // Use measurement DATE (not today) to calculate age for percentile
-              const ageMAtLatest = (member.birthdate && latest?.date) ?
-                Math.floor((new Date(latest.date)-new Date(member.birthdate))/(86400000*30.44)) : 0;
+              // Calculate age in months at measurement date (using proper date math, not floats)
+              function ageMonthsAt(birthStr, measStr) {
+                if(!birthStr || !measStr) return 0;
+                const [by,bm,bd] = birthStr.split("-").map(Number);
+                const [my,mm,md] = measStr.split("-").map(Number);
+                return (my-by)*12 + (mm-bm) - (md<bd?1:0);
+              }
+              const ageMAtLatest = ageMonthsAt(member.birthdate, latest?.date);
               const pctInfo = (isChild && latest?.peso && ageMAtLatest>0) ?
                 getPercentile(latest.peso, ageMAtLatest, member.sexo||"M") : null;
               return <>
@@ -1281,7 +1306,12 @@ export default function App() {
                           const range = maxW-minW;
                           const sorted = [...measurements].filter(m=>m.peso&&m.talla).sort((a,b)=>new Date(a.date)-new Date(b.date));
                           if(sorted.length<2) return null;
-                          const ages = sorted.map(m=>Math.floor((new Date(m.date)-new Date(member.birthdate))/(86400000*30.44)));
+                          const ages = sorted.map(m=>{
+                            if(!m.date) return 0;
+                            const [by,bm,bd]=member.birthdate.split("-").map(Number);
+                            const [my,mm,md]=m.date.split("-").map(Number);
+                            return (my-by)*12+(mm-bm)-(md<bd?1:0);
+                          });
                           const minAge = Math.min(...ages); const maxAge = Math.max(...ages);
                           const ageRange = maxAge-minAge || 1;
                           const toX = age => 40 + ((age-minAge)/ageRange)*350;
@@ -1345,7 +1375,13 @@ export default function App() {
                     {measurements.map((m,i)=>{
                       const ic = calcIMC(m.peso, m.talla);
                       const ii = imcLabel(ic);
-                      const pc = (isChild&&m.peso) ? getPercentile(m.peso, Math.floor((new Date(m.date)-new Date(member.birthdate))/(86400000*30.44)), member.sexo||"M") : null;
+                      const ageMHist = (()=>{
+                        if(!member.birthdate||!m.date) return 0;
+                        const [by,bm,bd]=member.birthdate.split("-").map(Number);
+                        const [my,mm,md]=m.date.split("-").map(Number);
+                        return (my-by)*12+(mm-bm)-(md<bd?1:0);
+                      })();
+                      const pc = (isChild&&m.peso&&ageMHist>0) ? getPercentile(m.peso, ageMHist, member.sexo||"M") : null;
                       return (
                         <div key={m.id||i} style={{background:"#fff",borderRadius:10,padding:"10px 14px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 1px 5px rgba(0,0,0,.05)"}}>
                           <div style={{flex:1}}>
@@ -1439,6 +1475,7 @@ export default function App() {
         onClose={closeModal}/>}
       {modal==="customVac"&&member&&<CustomVaccineModal
         member={member}
+        initial={editItem?.memberId?null:editItem}
         onSave={v=>{ saveCustomVaccine(member.id,v); closeModal(); }}
         onClose={closeModal}/>}
       {modal==="member"   &&<MemberModal   initial={editItem} onSave={saveMember}  onClose={closeModal}/>}
@@ -2051,8 +2088,15 @@ function MeasurementModal({ member, onSave, onClose }) {
 // ══════════════════════════════════════════
 //  CUSTOM VACCINE MODAL
 // ══════════════════════════════════════════
-function CustomVaccineModal({ member, onSave, onClose }) {
-  const [f, setF] = useState({ name:"", date: new Date().toISOString().split("T")[0], needsBooster:false, nextDate:"" });
+function CustomVaccineModal({ member, initial, onSave, onClose }) {
+  const [f, setF] = useState({
+    id: initial?.id||null,
+    name: initial?.name||"",
+    date: initial?.date||new Date().toISOString().split("T")[0],
+    needsBooster: initial?.needsBooster||false,
+    nextDate: initial?.nextDate||"",
+    boosterDate: initial?.boosterDate||"",
+  });
   const s=(k,v)=>setF(p=>({...p,[k]:v}));
   return (
     <Mdl title="Agregar vacuna extra" onClose={onClose}>
@@ -2072,8 +2116,12 @@ function CustomVaccineModal({ member, onSave, onClose }) {
         ))}
       </div>
       {f.needsBooster&&<>
-        <Lb>Fecha de la próxima dosis</Lb>
+        <Lb>Fecha estimada de la próxima dosis</Lb>
         <input type="date" style={S.inp} value={f.nextDate} onChange={e=>s("nextDate",e.target.value)}/>
+        <Lb>Fecha en que se aplicó el refuerzo (si ya se dio)</Lb>
+        <input type="date" style={S.inp} value={f.boosterDate} onChange={e=>s("boosterDate",e.target.value)}
+          placeholder="Dejá vacío si todavía no se aplicó"/>
+        {f.boosterDate&&<div style={{fontSize:11,color:"#5B8C5A",marginBottom:4}}>✅ Refuerzo ya aplicado el {fmt(f.boosterDate)}</div>}
       </>}
       <button style={S.saveBtn} onClick={()=>f.name&&f.date&&onSave(f)}>Guardar vacuna</button>
     </Mdl>
@@ -2215,26 +2263,49 @@ function PDFExportModal({ member, consultations, illnesses, appointments, applie
 // ══════════════════════════════════════════
 //  SMART COPY PANEL — cross-member relationship mapping
 // ══════════════════════════════════════════
+// All family keys for the copy panel
+const ALL_FAM_KEYS = [
+  {key:"madre",     label:"👩 Madre"},
+  {key:"padre",     label:"👨 Padre"},
+  {key:"hermanos",  label:"👦 Hermanos/as"},
+  {key:"abuelaMat", label:"👵 Abuela materna"},
+  {key:"abueloMat", label:"👴 Abuelo materno"},
+  {key:"tiosMat",   label:"🧑 Tíos/as maternos"},
+  {key:"abuelaPat", label:"👵 Abuela paterna"},
+  {key:"abueloPat", label:"👴 Abuelo paterno"},
+  {key:"tiosPat",   label:"🧑 Tíos/as paternos"},
+];
+
 const RELATIONSHIP_MAPS = [
   {
     label: "Copiar TODO (mismos antecedentes)",
-    desc: "Ej: hermanos que comparten madre, padre y abuelos",
-    map: {madre:"madre",padre:"padre",abuelaMat:"abuelaMat",abueloMat:"abueloMat",abuelaPat:"abuelaPat",abueloPat:"abueloPat",hermanos:"hermanos",tiosMat:"tiosMat",tiosPat:"tiosPat"}
+    desc: "Para hermanos que comparten todos los familiares",
+    map: Object.fromEntries(ALL_FAM_KEYS.map(f=>[f.key,f.key]))
   },
   {
-    label: "La abuela materna del niño = Madre del padre",
-    desc: "Ej: los datos de 'Abuela materna' del hijo van a 'Madre' del padre",
-    map: {abuelaMat:"madre", abueloMat:"padre", abuelaPat:"abuelaMat", abueloPat:"abueloMat"}
+    label: "Hijo → Padre (abuela mat. del hijo = madre del padre)",
+    desc: "Abuela materna → Madre · Abuelo materno → Padre · Abuela paterna → Abuela mat. · Abuelo paterno → Abuelo mat.",
+    map: {abuelaMat:"madre",abueloMat:"padre",abuelaPat:"abuelaMat",abueloPat:"abueloMat",tiosMat:"hermanos",tiosPat:"tiosMat"}
   },
   {
-    label: "La abuela paterna del niño = Madre del padre",
-    desc: "Ej: los datos de 'Abuela paterna' del hijo van a 'Madre' del padre",
-    map: {abuelaPat:"madre", abueloPat:"padre", abuelaMat:"abuelasMat", abueloMat:"abueloMat"}
+    label: "Hijo → Madre (abuela mat. del hijo = madre de la madre)",
+    desc: "Abuela materna → Madre · Abuelo materno → Padre · Abuela paterna → Abuela pat. · Abuelo paterno → Abuelo pat.",
+    map: {abuelaMat:"madre",abueloMat:"padre",abuelaPat:"abuelaPat",abueloPat:"abueloPat",tiosPat:"hermanos",tiosMat:"tiosPat"}
   },
   {
-    label: "Los padres del niño = Datos propios del padre/madre",
-    desc: "Ej: copiar la info de 'Madre' del hijo a los datos del integrante padre",
-    map: {madre:"madre", padre:"padre"}
+    label: "Copiar solo padres",
+    desc: "Solo Madre y Padre",
+    map: {madre:"madre",padre:"padre"}
+  },
+  {
+    label: "Copiar solo abuelos maternos",
+    desc: "Solo Abuela y Abuelo materno",
+    map: {abuelaMat:"abuelaMat",abueloMat:"abueloMat"}
+  },
+  {
+    label: "Copiar solo abuelos paternos",
+    desc: "Solo Abuela y Abuelo paterno",
+    map: {abuelaPat:"abuelaPat",abueloPat:"abueloPat"}
   },
 ];
 
@@ -2242,6 +2313,7 @@ function SmartCopyPanel({ currentMember, otherMembers, allAntecedentes, onCopy }
   const [open, setOpen] = useState(false);
   const [fromId, setFromId] = useState(otherMembers[0]?.id||null);
   const [mapIdx, setMapIdx] = useState(0);
+  const [customMap, setCustomMap] = useState({});
 
   return (
     <div style={{background:"#EEF7FF",border:"1px solid #C3D8F5",borderRadius:10,marginBottom:14}}>
@@ -2274,6 +2346,13 @@ function SmartCopyPanel({ currentMember, otherMembers, allAntecedentes, onCopy }
               <div style={{fontSize:11,color:"#888"}}>{rm.desc}</div>
             </div>
           ))}
+          {/* Custom 1:1 per-field mapping */}
+          <div style={{marginTop:8,padding:"8px 12px",borderRadius:8,border:`1px solid ${mapIdx===-1?"#3D405B":"#EDE9E3"}`,background:mapIdx===-1?"#F5F3EF":"#fff",cursor:"pointer"}}
+            onClick={()=>setMapIdx(-1)}>
+            <div style={{fontSize:12,fontWeight:600,color:"#3D405B"}}>✏️ Mapeo personalizado campo por campo</div>
+            <div style={{fontSize:11,color:"#888"}}>Elegís qué campo de origen va a qué campo destino</div>
+          </div>
+          {mapIdx===-1&&<CustomFieldMapper fromId={fromId} currentMember={currentMember} allAntecedentes={allAntecedentes} onCopy={onCopy} setOpen={setOpen}/>}
           <button
             style={{width:"100%",marginTop:10,padding:"10px",background:"#3D405B",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:600}}
             onClick={()=>{
@@ -2288,6 +2367,51 @@ function SmartCopyPanel({ currentMember, otherMembers, allAntecedentes, onCopy }
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════
+//  CUSTOM FIELD MAPPER — 1:1 per field copy
+// ══════════════════════════════════════════
+function CustomFieldMapper({ fromId, currentMember, allAntecedentes, onCopy, setOpen }) {
+  const fromAnt = allAntecedentes?.[fromId] || {};
+  const [mapping, setMapping] = useState({});
+  // Only show fields that have data in source
+  const availableFrom = ALL_FAM_KEYS.filter(f => fromAnt[f.key]);
+
+  if(!availableFrom.length) return (
+    <div style={{padding:"8px 12px",fontSize:12,color:"#888"}}>El integrante seleccionado no tiene antecedentes cargados.</div>
+  );
+
+  return (
+    <div style={{marginTop:8,background:"#FAF8F5",borderRadius:8,padding:"10px 12px"}}>
+      <div style={{fontSize:11,fontWeight:700,color:"#3D405B",marginBottom:8}}>
+        Para cada campo del origen, elegí dónde copiarlo:
+      </div>
+      {availableFrom.map(({key,label})=>(
+        <div key={key} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+          <div style={{fontSize:12,color:"#3D405B",width:120,flexShrink:0}}>{label}</div>
+          <span style={{color:"#aaa"}}>→</span>
+          <select style={{flex:1,padding:"5px 8px",borderRadius:6,border:"1px solid #EDE9E3",fontSize:12,background:"#fff"}}
+            value={mapping[key]||""}
+            onChange={e=>setMapping(m=>({...m,[key]:e.target.value}))}>
+            <option value="">— No copiar —</option>
+            {ALL_FAM_KEYS.map(f=><option key={f.key} value={f.key}>{f.label}</option>)}
+          </select>
+        </div>
+      ))}
+      <button style={{width:"100%",marginTop:8,padding:"9px",background:"#3D405B",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:600}}
+        onClick={()=>{
+          const activeMap = Object.fromEntries(Object.entries(mapping).filter(([,v])=>v));
+          if(!Object.keys(activeMap).length) { alert("Seleccioná al menos un campo a copiar"); return; }
+          if(confirm(`¿Copiar ${Object.keys(activeMap).length} campos a ${currentMember.name}?`)){
+            onCopy(fromId, activeMap);
+            setOpen(false);
+          }
+        }}>
+        Copiar campos seleccionados
+      </button>
     </div>
   );
 }
