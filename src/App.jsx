@@ -64,6 +64,13 @@ const daysUntil = s => {
 };
 const getAge = bd => { if(!bd) return null; return Math.floor((Date.now()-new Date(bd).getTime())/(86400000*365.25)); };
 const addMonths = (date,m) => { const d=new Date(date); d.setMonth(d.getMonth()+m); return d; };
+function ageMonthsAt(birthStr, measStr) {
+  if(!birthStr || !measStr) return 0;
+  const [by,bm,bd] = birthStr.split("-").map(Number);
+  const [my,mm,md] = measStr.split("-").map(Number);
+  const m = (my-by)*12 + (mm-bm) - (md<bd?1:0);
+  return m < 0 ? 0 : m;
+}
 const vacKey = v => `${v.vaccine}||${v.dosis}`;
 
 // ── IMC & Crecimiento ──
@@ -1247,13 +1254,6 @@ export default function App() {
               const latest = measurements[0];
               const imc = latest ? calcIMC(latest.peso, latest.talla) : null;
               const imcInfo = imcLabel(imc);
-              // Calculate age in months at measurement date (using proper date math, not floats)
-              function ageMonthsAt(birthStr, measStr) {
-                if(!birthStr || !measStr) return 0;
-                const [by,bm,bd] = birthStr.split("-").map(Number);
-                const [my,mm,md] = measStr.split("-").map(Number);
-                return (my-by)*12 + (mm-bm) - (md<bd?1:0);
-              }
               const ageMAtLatest = ageMonthsAt(member.birthdate, latest?.date);
               const pctInfo = (isChild && latest?.peso && ageMAtLatest>0) ?
                 getPercentile(latest.peso, ageMAtLatest, member.sexo||"M") : null;
@@ -2309,11 +2309,10 @@ const RELATIONSHIP_MAPS = [
   },
 ];
 
-function SmartCopyPanel({ currentMember, otherMembers, allAntecedentes, onCopy }) {
+function SmartCopyPanel({ currentMember, otherMembers, allAntecedentes, onCopy, setOpen: setOuterOpen }) {
   const [open, setOpen] = useState(false);
   const [fromId, setFromId] = useState(otherMembers[0]?.id||null);
   const [mapIdx, setMapIdx] = useState(0);
-  const [customMap, setCustomMap] = useState({});
 
   return (
     <div style={{background:"#EEF7FF",border:"1px solid #C3D8F5",borderRadius:10,marginBottom:14}}>
@@ -2360,7 +2359,7 @@ function SmartCopyPanel({ currentMember, otherMembers, allAntecedentes, onCopy }
               const fromName = otherMembers.find(m=>m.id===fromId)?.name||"otro integrante";
               if(confirm(`¿Copiar antecedentes de ${fromName} a ${currentMember.name} usando la relación "${RELATIONSHIP_MAPS[mapIdx].label}"?`)){
                 onCopy(fromId, RELATIONSHIP_MAPS[mapIdx].map);
-                setOpen(false);
+                setOpen(false); // close inner expand
               }
             }}>
             Copiar ahora
