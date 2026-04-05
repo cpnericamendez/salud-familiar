@@ -2534,14 +2534,15 @@ function PersonCondiciones({ condiciones, onUpdate, inpStyle, lblStyle }) {
 //  ANTECEDENTES CARD — múltiples enfermedades
 // ══════════════════════════════════════════
 function AntecedentesCard({ label, datos, onSave, multiple=false }) {
-  // multiple=true: datos is array of people; multiple=false: single person object
-  if(multiple) return <AntecedentesMultiple label={label} datos={Array.isArray(datos)?datos:[]} onSave={onSave}/>;
   const [open, setOpen] = useState(false);
   // datos = { nombre, notas, condiciones: [{id, enfermedad, medicamentos}] }
-  const [nombre,    setNombre]    = useState(datos.nombre||"");
-  const [notas,     setNotas]     = useState(datos.notas||"");
-  const [condiciones, setCondiciones] = useState(datos.condiciones||[]);
+  const [nombre,    setNombre]    = useState(!multiple ? (datos?.nombre||"") : "");
+  const [notas,     setNotas]     = useState(!multiple ? (datos?.notas||"") : "");
+  const [condiciones, setCondiciones] = useState(!multiple ? (datos?.condiciones||[]) : []);
   const hasData = nombre || condiciones.length > 0;
+
+  // If multiple=true, delegate entirely to AntecedentesMultiple
+  if(multiple) return <AntecedentesMultiple label={label} datos={Array.isArray(datos)?datos:[]} onSave={onSave}/>;
 
   function save(n, no, conds) {
     onSave({ nombre:n, notas:no, condiciones:conds });
