@@ -706,8 +706,7 @@ export default function App() {
     const upcoming = all.filter(a=>daysUntil(a.date)>=0).sort((a,b)=>new Date(a.date)-new Date(b.date));
     const past     = all.filter(a=>daysUntil(a.date)<0).sort((a,b)=>new Date(b.date)-new Date(a.date));
     return [...upcoming, ...past];
-  }
-  ,[data.appointments, memberId]);
+  }, [data.appointments, memberId]);
 
   const memberIllnesses = useMemo(()=>
     (data.illnesses||[]).filter(il=>il.memberId===memberId).sort((a,b)=>new Date(b.startDate)-new Date(a.startDate))
