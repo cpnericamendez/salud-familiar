@@ -675,6 +675,34 @@ export default function App() {
   const member     = data.members.find(m=>m.id===memberId);
   const closeModal = ()=>{ setModal(null); setEditItem(null); };
 
+  // ── Backup / Restore ──
+  function exportBackup() {
+    const backup = { ...data, _exportDate: new Date().toISOString(), _version: "salud-familiar-v1" };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `salud-familiar-backup-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  function importBackup(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const imported = JSON.parse(ev.target.result);
+        if (!imported.members || !imported.appointments) { alert("Archivo inválido — no parece un backup de Salud Familiar."); return; }
+        if (confirm("¿Restaurar backup? Esto reemplazará todos los datos actuales.")) {
+          setDataTS(() => imported);
+        }
+      } catch { alert("Error al leer el archivo."); }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
   // Upcoming appointments
   const upcomingAppts = useMemo(()=>{
     const n=new Date(); n.setHours(0,0,0,0);
@@ -861,6 +889,11 @@ export default function App() {
           <div style={{...S.syncPill, background: syncStatus==="ok"?"#E8F5EC":syncStatus==="error"?"#FFF0F0":"#FFF7ED", color: syncStatus==="ok"?"#3D6B54":syncStatus==="error"?"#C0392B":"#7D5A30", border:`1px solid ${syncStatus==="ok"?"#81B29A":syncStatus==="error"?"#F8BCBC":"#F2CC8F"}`}}>
             {syncStatus==="ok"?"☁️ Sincronizado":syncStatus==="error"?"⚠️ Sin conexión":"⏳ Guardando..."}
           </div>
+          <button title="Exportar backup" onClick={exportBackup}
+            style={{background:"none",border:"none",fontSize:18,cursor:"pointer",padding:"2px 4px",opacity:.7}}>💾</button>
+          <label title="Importar backup" style={{fontSize:18,cursor:"pointer",padding:"2px 4px",opacity:.7}}>
+            📂<input type="file" accept=".json" style={{display:"none"}} onChange={importBackup}/>
+          </label>
         </div>
       </header>
 
