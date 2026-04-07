@@ -1226,15 +1226,9 @@ export default function App() {
                                 )}
                               </div>
                               <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-end"}}>
-                                {v.nextDate&&!boosterApplied&&(
-                                  <button style={{fontSize:10,background:"#E8F5EC",border:"1px solid #81B29A",color:"#3D6B54",borderRadius:12,padding:"3px 8px",cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}
-                                    onClick={()=>{
-                                      const d = prompt("Fecha en que se aplicó el refuerzo (AAAA-MM-DD):", new Date().toISOString().split("T")[0]);
-                                      if(d) saveCustomVaccine(member.id,{...v,boosterDate:d});
-                                    }}>
-                                    ✓ Refuerzo aplicado
-                                  </button>
-                                )}
+                                 {v.nextDate&&!boosterApplied&&(
+                                   <BoosterBtn onSave={date=>saveCustomVaccine(member.id,{...v,boosterDate:date})}/>
+                                 )}
                                 <button style={{...S.iBtnSm,fontSize:12}} onClick={()=>{setEditItem(v);setModal("customVac");}}>✏️</button>
                                 <button style={{...S.iBtnSm,color:"#E07A5F"}} onClick={()=>delCustomVaccine(member.id,v.id)}>🗑️</button>
                               </div>
@@ -2277,38 +2271,79 @@ const ALL_FAM_KEYS = [
 
 const RELATIONSHIP_MAPS = [
   {
-    label: "Copiar TODO (mismos antecedentes)",
-    desc: "Para hermanos que comparten todos los familiares",
+    label: "Copiar TODO (mismos familiares)",
+    desc: "Para hermanos que comparten madre, padre y abuelos",
     map: Object.fromEntries(ALL_FAM_KEYS.map(f=>[f.key,f.key]))
   },
   {
-    label: "Hijo → Padre (abuela mat. del hijo = madre del padre)",
-    desc: "Abuela materna → Madre · Abuelo materno → Padre · Abuela paterna → Abuela mat. · Abuelo paterno → Abuelo mat.",
+    label: "Hijo → Padre: sus abuelos maternos = padres del padre",
+    desc: "Abuela materna→Madre · Abuelo materno→Padre · Abuela paterna→Abuela mat. · Abuelo paterno→Abuelo mat.",
     map: {abuelaMat:"madre",abueloMat:"padre",abuelaPat:"abuelaMat",abueloPat:"abueloMat",tiosMat:"hermanos",tiosPat:"tiosMat"}
   },
   {
-    label: "Hijo → Madre (abuela mat. del hijo = madre de la madre)",
-    desc: "Abuela materna → Madre · Abuelo materno → Padre · Abuela paterna → Abuela pat. · Abuelo paterno → Abuelo pat.",
-    map: {abuelaMat:"madre",abueloMat:"padre",abuelaPat:"abuelaPat",abueloPat:"abueloPat",tiosPat:"hermanos",tiosMat:"tiosPat"}
+    label: "Hijo → Madre: sus abuelos paternos = padres de la madre",
+    desc: "Abuela paterna→Madre · Abuelo paterno→Padre · Abuela materna→Abuela mat. · Abuelo materno→Abuelo mat.",
+    map: {abuelaPat:"madre",abueloPat:"padre",abuelaMat:"abuelaMat",abueloMat:"abueloMat",tiosPat:"hermanos",tiosMat:"tiosMat"}
   },
   {
-    label: "Copiar solo padres",
-    desc: "Solo Madre y Padre",
-    map: {madre:"madre",padre:"padre"}
+    label: "Solo Madre → Madre",
+    desc: "Copia únicamente el campo Madre",
+    map: {madre:"madre"}
   },
   {
-    label: "Copiar solo abuelos maternos",
-    desc: "Solo Abuela y Abuelo materno",
-    map: {abuelaMat:"abuelaMat",abueloMat:"abueloMat"}
+    label: "Solo Padre → Padre",
+    desc: "Copia únicamente el campo Padre",
+    map: {padre:"padre"}
   },
   {
-    label: "Copiar solo abuelos paternos",
-    desc: "Solo Abuela y Abuelo paterno",
-    map: {abuelaPat:"abuelaPat",abueloPat:"abueloPat"}
+    label: "Solo Abuela materna → Abuela materna",
+    map: {abuelaMat:"abuelaMat"}
+  },
+  {
+    label: "Solo Abuelo materno → Abuelo materno",
+    map: {abueloMat:"abueloMat"}
+  },
+  {
+    label: "Solo Abuela paterna → Abuela paterna",
+    map: {abuelaPat:"abuelaPat"}
+  },
+  {
+    label: "Solo Abuelo paterno → Abuelo paterno",
+    map: {abueloPat:"abueloPat"}
+  },
+  {
+    label: "Solo Hermanos → Hermanos",
+    map: {hermanos:"hermanos"}
+  },
+  {
+    label: "Solo Tíos maternos → Tíos maternos",
+    map: {tiosMat:"tiosMat"}
+  },
+  {
+    label: "Solo Tíos paternos → Tíos paternos",
+    map: {tiosPat:"tiosPat"}
+  },
+  {
+    label: "Abuela materna del hijo → Madre (del padre/madre)",
+    desc: "Un solo campo: abuela materna → madre",
+    map: {abuelaMat:"madre"}
+  },
+  {
+    label: "Abuelo materno del hijo → Padre (del padre/madre)",
+    desc: "Un solo campo: abuelo materno → padre",
+    map: {abueloMat:"padre"}
+  },
+  {
+    label: "Abuela paterna del hijo → Madre (del padre/madre)",
+    map: {abuelaPat:"madre"}
+  },
+  {
+    label: "Abuelo paterno del hijo → Padre (del padre/madre)",
+    map: {abueloPat:"padre"}
   },
 ];
 
-function SmartCopyPanel({ currentMember, otherMembers, allAntecedentes, onCopy, setOpen: setOuterOpen }) {
+function SmartCopyPanel({ currentMember, otherMembers, allAntecedentes, onCopy }) {
   const [open, setOpen] = useState(false);
   const [fromId, setFromId] = useState(otherMembers[0]?.id||null);
   const [mapIdx, setMapIdx] = useState(0);
@@ -2597,6 +2632,31 @@ function AntecedentesCard({ label, datos, onSave, multiple=false }) {
     </div>
   );
 }
+
+// ── BoosterBtn: inline date picker for booster application ──
+function BoosterBtn({ onSave }) {
+  const [show, setShow] = useState(false);
+  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  if (!show) return (
+    <button
+      style={{fontSize:10,background:"#E8F5EC",border:"1px solid #81B29A",color:"#3D6B54",
+        borderRadius:12,padding:"3px 8px",cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}
+      onClick={()=>setShow(true)}>
+      ✓ Marcar refuerzo aplicado
+    </button>
+  );
+  return (
+    <div style={{background:"#F0FBF4",border:"1px solid #81B29A",borderRadius:8,padding:"6px 8px",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+      <input type="date" value={date} onChange={e=>setDate(e.target.value)}
+        style={{fontSize:11,border:"1px solid #81B29A",borderRadius:6,padding:"2px 6px"}}/>
+      <button style={{fontSize:11,background:"#5B8C5A",color:"#fff",border:"none",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontWeight:600}}
+        onClick={()=>{if(date){onSave(date);setShow(false);}}}> Guardar</button>
+      <button style={{fontSize:11,background:"none",border:"none",color:"#aaa",cursor:"pointer"}}
+        onClick={()=>setShow(false)}>✕</button>
+    </div>
+  );
+}
+
 
 const S = {
   app:     {minHeight:"100vh",background:"#FAF8F5",fontFamily:"'DM Sans',sans-serif",color:"#3D405B"},
