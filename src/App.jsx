@@ -611,41 +611,6 @@ export default function App() {
     return () => clearTimeout(t);
   }, [data, synced]);
 
-  // ── OneSignal Push Notifications ──
-  useEffect(() => {
-    if (!synced) return;
-    // OneSignal SDK loaded via script tag in index.html
-    // It handles permission request and subscription automatically
-    if (typeof window.OneSignal === "undefined") return;
-    window.OneSignal.push(() => {
-      window.OneSignal.init({
-        appId: "REEMPLAZAR_CON_ONESIGNAL_APP_ID",
-        safari_web_id: "web.onesignal.auto.REEMPLAZAR",
-        notifyButton: { enable: false },
-        allowLocalhostAsSecureOrigin: true,
-      });
-      // Ask permission after first interaction
-      window.OneSignal.showSlidedownPrompt();
-    });
-  }, [synced]);
-
-  // ── Schedule notifications for today/tomorrow turnos via OneSignal ──
-  useEffect(() => {
-    if (!synced) return;
-    async function scheduleReminders() {
-      if (typeof window.OneSignal === "undefined") return;
-      try {
-        const userId = await new Promise(res => window.OneSignal.getUserId(res));
-        if (!userId) return;
-        // Store userId so Cloud-side can target this device
-        await setDoc(doc(db, "pushTokens", userId), {
-          userId,
-          updatedAt: Date.now()
-        }, { merge: true });
-      } catch {}
-    }
-    scheduleReminders();
-  }, [synced]);
 
   // ── Daily appointment reminder check ──
   useEffect(() => {
