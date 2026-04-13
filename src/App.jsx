@@ -88,362 +88,120 @@ function imcLabel(imc) {
   return             { label:"Obesidad",   color:"#E07A5F" };
 }
 // OMS Percentiles peso (kg) por edad (meses) — niños 0-60m aproximado (p3,p15,p50,p85,p97)
+// Tablas OMS 2006 — Peso (kg) por edad (meses)
+// Columnas: p3, p15, p50, p85, p97
 const OMS_PESO_NINO = {
-  0:[2.5,2.9,3.3,3.7,4.2], 3:[5.0,5.6,6.4,7.2,7.9], 6:[6.4,7.1,7.9,8.8,9.7],
-  12:[8.1,8.9,9.6,10.8,11.8], 24:[10.2,11.5,12.2,13.5,15.0], 36:[12.0,13.5,14.3,16.0,17.5],
-  48:[13.7,15.3,16.3,18.3,20.0], 60:[15.2,17.0,18.3,20.5,22.5]
+  0:  [2.5, 2.9, 3.3, 3.7, 4.2],
+  1:  [3.4, 3.9, 4.5, 5.1, 5.7],
+  2:  [4.4, 5.0, 5.6, 6.3, 7.1],
+  3:  [5.1, 5.7, 6.4, 7.2, 8.0],
+  4:  [5.6, 6.2, 7.0, 7.8, 8.7],
+  5:  [6.1, 6.7, 7.5, 8.4, 9.3],
+  6:  [6.4, 7.1, 7.9, 8.8, 9.7],
+  7:  [6.7, 7.4, 8.3, 9.2, 10.2],
+  8:  [6.9, 7.7, 8.6, 9.6, 10.5],
+  9:  [7.1, 7.9, 8.9, 9.9, 10.9],
+  10: [7.4, 8.2, 9.2, 10.2, 11.2],
+  11: [7.6, 8.4, 9.4, 10.5, 11.5],
+  12: [7.7, 8.6, 9.6, 10.8, 11.8],
+  14: [8.1, 9.0, 10.1, 11.3, 12.4],
+  16: [8.5, 9.4, 10.5, 11.7, 12.9],
+  18: [8.8, 9.8, 10.9, 12.2, 13.4],
+  20: [9.2, 10.1, 11.3, 12.6, 13.9],
+  22: [9.5, 10.5, 11.8, 13.1, 14.5],
+  24: [9.8, 10.8, 12.2, 13.6, 15.0],
+  27: [10.2, 11.3, 12.7, 14.2, 15.7],
+  30: [10.6, 11.8, 13.3, 14.9, 16.5],
+  33: [11.0, 12.3, 13.8, 15.5, 17.2],
+  36: [11.3, 12.7, 14.3, 16.0, 17.8],
+  39: [11.7, 13.1, 14.8, 16.6, 18.5],
+  42: [12.1, 13.5, 15.3, 17.2, 19.1],
+  45: [12.4, 13.9, 15.8, 17.7, 19.7],
+  48: [12.7, 14.3, 16.3, 18.3, 20.4],
+  51: [13.1, 14.7, 16.8, 18.9, 21.1],
+  54: [13.4, 15.1, 17.3, 19.5, 21.8],
+  57: [13.7, 15.5, 17.8, 20.1, 22.5],
+  60: [14.1, 15.9, 18.3, 20.7, 23.2],
+  66: [14.8, 16.8, 19.4, 22.0, 24.8],
+  72: [15.6, 17.7, 20.5, 23.4, 26.5],
+  78: [16.3, 18.7, 21.7, 24.9, 28.3],
+  84: [17.1, 19.7, 23.0, 26.5, 30.3],
+  90: [18.0, 20.8, 24.4, 28.3, 32.6],
+  96: [18.9, 21.9, 25.8, 30.1, 34.9],
+  102:[19.8, 23.1, 27.4, 32.2, 37.6],
+  108:[20.9, 24.4, 29.1, 34.4, 40.4],
+  114:[22.0, 25.8, 30.9, 36.7, 43.4],
+  120:[23.2, 27.4, 32.9, 39.4, 46.9],
+  126:[24.5, 29.1, 35.1, 42.3, 50.7],
+  132:[25.9, 30.9, 37.4, 45.4, 54.8],
 };
 const OMS_PESO_NINA = {
-  0:[2.4,2.8,3.2,3.6,4.0], 3:[4.6,5.2,5.8,6.6,7.3], 6:[5.7,6.5,7.3,8.2,9.3],
-  12:[7.3,8.1,8.9,10.1,11.5], 24:[9.8,11.1,11.5,13.2,14.8], 36:[11.5,13.0,13.9,15.7,17.5],
-  48:[13.0,14.8,16.1,18.3,20.4], 60:[14.2,16.4,18.2,20.8,23.5]
+  0:  [2.4, 2.8, 3.2, 3.7, 4.2],
+  1:  [3.2, 3.6, 4.2, 4.8, 5.5],
+  2:  [4.0, 4.5, 5.1, 5.8, 6.6],
+  3:  [4.6, 5.2, 5.8, 6.6, 7.5],
+  4:  [5.1, 5.7, 6.4, 7.3, 8.2],
+  5:  [5.5, 6.1, 6.9, 7.8, 8.8],
+  6:  [5.7, 6.4, 7.3, 8.2, 9.3],
+  7:  [6.0, 6.7, 7.6, 8.6, 9.7],
+  8:  [6.3, 7.0, 7.9, 9.0, 10.2],
+  9:  [6.5, 7.3, 8.2, 9.3, 10.5],
+  10: [6.7, 7.5, 8.5, 9.6, 10.9],
+  11: [6.9, 7.7, 8.7, 9.9, 11.2],
+  12: [7.1, 7.9, 8.9, 10.1, 11.5],
+  14: [7.4, 8.3, 9.4, 10.7, 12.2],
+  16: [7.8, 8.7, 9.8, 11.2, 12.8],
+  18: [8.1, 9.1, 10.2, 11.7, 13.4],
+  20: [8.4, 9.4, 10.6, 12.2, 14.0],
+  22: [8.7, 9.8, 11.1, 12.7, 14.6],
+  24: [9.0, 10.2, 11.5, 13.2, 15.3],
+  27: [9.4, 10.7, 12.1, 13.9, 16.1],
+  30: [9.8, 11.1, 12.6, 14.6, 16.9],
+  33: [10.2, 11.6, 13.2, 15.3, 17.8],
+  36: [10.6, 12.0, 13.9, 16.0, 18.7],
+  39: [11.0, 12.5, 14.5, 16.8, 19.6],
+  42: [11.3, 12.9, 15.0, 17.5, 20.5],
+  45: [11.7, 13.4, 15.6, 18.2, 21.4],
+  48: [12.1, 13.8, 16.1, 18.9, 22.3],
+  51: [12.4, 14.3, 16.7, 19.7, 23.3],
+  54: [12.8, 14.7, 17.3, 20.4, 24.3],
+  57: [13.2, 15.2, 17.9, 21.2, 25.3],
+  60: [13.7, 15.7, 18.5, 22.0, 26.4],
+  66: [14.5, 16.7, 19.9, 23.8, 28.8],
+  72: [15.3, 17.7, 21.2, 25.6, 31.3],
+  78: [16.2, 18.8, 22.7, 27.6, 34.1],
+  84: [17.0, 19.9, 24.2, 29.7, 37.0],
+  90: [18.0, 21.2, 25.9, 32.1, 40.4],
+  96: [19.0, 22.5, 27.8, 34.8, 44.2],
+  102:[20.1, 23.9, 29.8, 37.7, 48.3],
+  108:[21.3, 25.5, 31.9, 40.9, 52.8],
+  114:[22.7, 27.3, 34.3, 44.4, 57.6],
+  120:[24.2, 29.2, 36.9, 48.2, 62.8],
+  126:[25.8, 31.3, 39.7, 52.2, 68.2],
+  132:[27.6, 33.6, 42.9, 56.6, 73.9],
 };
+
 function getPercentile(peso, ageMonths, sexo) {
-  if (!peso || !ageMonths) return null;
+  if (!peso || ageMonths === null || ageMonths === undefined) return null;
   const table = sexo === "F" ? OMS_PESO_NINA : OMS_PESO_NINO;
   const keys = Object.keys(table).map(Number).sort((a,b)=>a-b);
-  let closest = keys[0];
-  for (const k of keys) { if (ageMonths >= k) closest = k; }
-  const refs = table[closest];
+  // Find closest key (interpolate between two nearest)
+  let lower = keys[0], upper = keys[keys.length-1];
+  for (const k of keys) {
+    if (k <= ageMonths) lower = k;
+    if (k >= ageMonths && upper === keys[keys.length-1]) upper = k;
+  }
+  for (const k of keys) { if (k >= ageMonths) { upper = k; break; } }
+  // Use lower key refs (conservative)
+  const refs = table[lower];
   if (!refs) return null;
   const p = parseFloat(peso);
-  if (p <= refs[0]) return { pct:"<p3",  label:"Muy bajo", color:"#E07A5F" };
-  if (p <= refs[1]) return { pct:"p3-15", label:"Bajo",   color:"#C9A96E" };
-  if (p <= refs[2]) return { pct:"p15-50",label:"Normal", color:"#5B8C5A" };
-  if (p <= refs[3]) return { pct:"p50-85",label:"Normal", color:"#5B8C5A" };
-  if (p <= refs[4]) return { pct:"p85-97",label:"Alto",   color:"#C9A96E" };
-  return               { pct:">p97",  label:"Muy alto", color:"#E07A5F" };
-}
-
-// ── PDF Engine (uses jsPDF loaded via script tag) ──
-function loadJsPDF() {
-  return new Promise((resolve, reject) => {
-    if (window.jspdf) { resolve(window.jspdf.jsPDF); return; }
-    const s = document.createElement("script");
-    s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-    s.onload = () => resolve(window.jspdf.jsPDF);
-    s.onerror = reject;
-    document.head.appendChild(s);
-  });
-}
-
-// PDF builder — returns jsPDF doc
-async function buildPDF({ member, consultations, illnesses, appointments, appliedVaccines, mode, filterSpec, filterId }) {
-  const jsPDF = await loadJsPDF();
-  const doc = new jsPDF({ unit:"mm", format:"a4" });
-  const PW = 210, PH = 297;
-  const ML = 18, MR = 18, MT = 20;
-  const CW = PW - ML - MR;
-  let y = MT;
-  const today = new Date().toLocaleDateString("es-AR");
-
-  // ── colors (RGB)
-  const C_DARK  = [61,64,91];
-  const C_MED   = [100,105,130];
-  const C_LIGHT = [180,183,200];
-  const C_LINE  = [237,233,227];
-  const C_ACC   = [224,122,95];
-  const C_GRN   = [91,140,90];
-  const C_YEL   = [201,169,110];
-
-  function setColor(rgb) { doc.setTextColor(...rgb); }
-  function setDraw(rgb)  { doc.setDrawColor(...rgb); }
-  function setFill(rgb)  { doc.setFillColor(...rgb); }
-
-  function checkPage(need=10) {
-    if (y + need > PH - 18) { doc.addPage(); y = MT; drawPageHeader(); }
-  }
-
-  function hline(yy, r=C_LINE) {
-    setDraw(r); doc.setLineWidth(0.2);
-    doc.line(ML, yy, PW-MR, yy);
-  }
-
-  function drawPageHeader() {
-    // thin top bar
-    setFill(C_DARK); doc.rect(0, 0, PW, 8, "F");
-    setFill(C_ACC);  doc.rect(0, 0, 40, 8, "F");
-    doc.setFont("helvetica","bold"); doc.setFontSize(7);
-    setColor([255,255,255]);
-    doc.text("SALUD FAMILIAR", 5, 5.5);
-    setColor(C_LIGHT);
-    doc.text(`${member.name.toUpperCase()}  ·  ${modeLabel}`, 44, 5.5);
-    doc.text(`Generado: ${today}`, PW-MR, 5.5, {align:"right"});
-  }
-
-  const MODES = { all:"Historia Clínica Completa", consultas:"Consultas Médicas", illness:"Enfermedades y Tratamientos", one_consult:"Consulta", one_illness:"Enfermedad / Tratamiento" };
-  const modeLabel = MODES[mode] || "Resumen";
-
-  // ── COVER ──
-  setFill(C_DARK); doc.rect(0,0,PW,52,"F");
-  setFill(C_ACC);  doc.rect(0,48,PW,4,"F");
-
-  // avatar circle
-  setFill([255,255,255]); doc.circle(ML+16, 26, 16, "F");
-  doc.setFont("helvetica","bold"); doc.setFontSize(22);
-  setColor(C_DARK);
-  doc.text(member.avatar||"👤", ML+8, 30);
-
-  // name block
-  doc.setFont("helvetica","bold"); doc.setFontSize(22);
-  setColor([255,255,255]);
-  doc.text(member.name, ML+38, 22);
-  doc.setFont("helvetica","normal"); doc.setFontSize(11);
-  setColor(C_LIGHT);
-  const infoParts = [];
-  if (member.birthdate) infoParts.push(`Nac. ${fmt(member.birthdate)}  ·  ${getAge(member.birthdate)} años`);
-  if (member.bloodType) infoParts.push(`Grupo: ${member.bloodType}`);
-  if (member.allergies) infoParts.push(`Alergias: ${member.allergies}`);
-  infoParts.forEach((p,i) => doc.text(p, ML+38, 30+i*7));
-
-  // document type label
-  doc.setFont("helvetica","bold"); doc.setFontSize(13);
-  setColor(C_ACC);
-  doc.text(modeLabel.toUpperCase(), ML+38, 46);
-
-  y = 62;
-  drawPageHeader();
-
-  // helper — section header
-  function sectionHeader(title, icon="") {
-    checkPage(14);
-    setFill([245,243,239]); doc.roundedRect(ML, y, CW, 9, 1.5, 1.5, "F");
-    hline(y+9, C_LINE);
-    doc.setFont("helvetica","bold"); doc.setFontSize(10);
-    setColor(C_DARK);
-    doc.text((icon+" "+title).trim(), ML+4, y+6.2);
-    y += 13;
-  }
-
-  // helper — labeled field
-  function field(label, value, opts={}) {
-    if (!value) return;
-    const lines = doc.splitTextToSize(String(value), CW - (opts.indent||0) - 2);
-    const needH = 5 + lines.length * 5;
-    checkPage(needH+3);
-    doc.setFont("helvetica","bold"); doc.setFontSize(8.5);
-    setColor(C_MED);
-    doc.text(label.toUpperCase(), ML+(opts.indent||0), y);
-    doc.setFont("helvetica","normal"); doc.setFontSize(9.5);
-    setColor(C_DARK);
-    doc.text(lines, ML+(opts.indent||0), y+5);
-    y += needH + 2;
-  }
-
-  // helper — card wrapper
-  function card(drawFn, estimateH=30) {
-    checkPage(estimateH+6);
-    const startY = y;
-    y += 3;
-    drawFn();
-    y += 4;
-    setDraw(C_LINE); doc.setLineWidth(0.3);
-    doc.roundedRect(ML, startY, CW, y-startY, 1.5, 1.5);
-    y += 4;
-  }
-
-  // ─────────────────────────────────
-  //  SINGLE CONSULT
-  // ─────────────────────────────────
-  function renderConsult(c) {
-    card(()=>{
-      // header strip
-      setFill([248,246,242]);
-      const hh = 10;
-      doc.roundedRect(ML, y-3, CW, hh, 1.5, 1.5, "F");
-      doc.setFont("helvetica","bold"); doc.setFontSize(11);
-      setColor(C_DARK);
-      doc.text(c.specialist||"Médico", ML+4, y+4);
-      doc.setFont("helvetica","normal"); doc.setFontSize(9);
-      setColor(C_MED);
-      if(c.specialty) doc.text(c.specialty, ML+4, y+9);
-      doc.setFont("helvetica","bold"); doc.setFontSize(9);
-      setColor(C_ACC);
-      doc.text(fmt(c.date), PW-MR-2, y+4, {align:"right"});
-      y += hh + 4;
-      if(c.reason)       field("Motivo de consulta", c.reason);
-      if(c.diagnosis)    field("Diagnóstico", c.diagnosis);
-      if(c.medications)  field("Medicamentos recetados", c.medications);
-      if(c.nextSteps)    field("Indicaciones / próximos pasos", c.nextSteps);
-      if(c.notes)        field("Notas", c.notes);
-      if(c.nextAppointment) field("Próximo turno", `${fmt(c.nextAppointment)}${c.nextAppointmentNote?" — "+c.nextAppointmentNote:""}`);
-      if(c.studies?.length){
-        checkPage(8);
-        doc.setFont("helvetica","bold"); doc.setFontSize(8.5); setColor(C_MED);
-        doc.text("ESTUDIOS REALIZADOS", ML, y); y+=5;
-        c.studies.forEach(st=>{ doc.setFont("helvetica","normal"); doc.setFontSize(9); setColor(C_DARK); doc.text("• "+st, ML+3, y); y+=5; });
-        y+=2;
-      }
-    }, 50);
-  }
-
-  // ─────────────────────────────────
-  //  SINGLE ILLNESS
-  // ─────────────────────────────────
-  function renderIllness(il) {
-    card(()=>{
-      setFill(il.active?[255,240,240]:[240,251,244]);
-      doc.roundedRect(ML, y-3, CW, 10, 1.5,1.5,"F");
-      doc.setFont("helvetica","bold"); doc.setFontSize(11); setColor(C_DARK);
-      doc.text(il.name||"Enfermedad", ML+4, y+4);
-      doc.setFont("helvetica","normal"); doc.setFontSize(8.5); setColor(il.active?C_ACC:C_GRN);
-      doc.text(il.active?"● Activa":"✓ Recuperado", PW-MR-2, y+4, {align:"right"});
-      doc.setFont("helvetica","normal"); doc.setFontSize(9); setColor(C_MED);
-      const dateRange = `Desde ${fmt(il.startDate)}${il.endDate?" hasta "+fmt(il.endDate):""}`;
-      doc.text(dateRange, ML+4, y+9);
-      y += 14;
-      if(il.doctor)    field("Médico", il.doctor);
-      if(il.symptoms)  field("Síntomas", il.symptoms);
-      if(il.treatment) field("Tratamiento", il.treatment);
-      if(il.notes)     field("Notas", il.notes);
-      if(il.medications?.length){
-        checkPage(10);
-        doc.setFont("helvetica","bold"); doc.setFontSize(9); setColor(C_DARK);
-        doc.text("Medicamentos y horarios", ML, y); y+=6;
-        il.medications.forEach(med=>{
-          checkPage(20);
-          setFill([250,248,245]); doc.roundedRect(ML+2, y-1, CW-4, 
-            (med.times?.filter(t=>t).length?16:12)+(med.notes?6:0), 1,1,"F");
-          doc.setFont("helvetica","bold"); doc.setFontSize(9.5); setColor(C_DARK);
-          doc.text(med.name||"Medicamento", ML+5, y+4);
-          if(med.dose){ doc.setFont("helvetica","normal"); doc.setFontSize(8.5); setColor(C_MED); doc.text(med.dose, ML+5, y+9); }
-          doc.setFont("helvetica","normal"); doc.setFontSize(8.5); setColor(C_YEL);
-          doc.text(med.frequency||"", PW-MR-5, y+4, {align:"right"});
-          y+=12;
-          if(med.times?.filter(t=>t).length){
-            doc.setFont("helvetica","bold"); doc.setFontSize(8); setColor(C_MED);
-            doc.text("Horarios: ", ML+5, y);
-            doc.setFont("helvetica","normal"); setColor(C_DARK);
-            doc.text(med.times.filter(t=>t).join("  ·  "), ML+22, y);
-            y+=6;
-          }
-          if(med.notes){ doc.setFont("helvetica","italic"); doc.setFontSize(8); setColor(C_MED); doc.text(med.notes, ML+5, y); y+=6; }
-          y+=4;
-        });
-      }
-    }, 60);
-  }
-
-  // ─────────────────────────────────
-  //  BUILD CONTENT BY MODE
-  // ─────────────────────────────────
-  if(mode==="one_consult") {
-    const c = consultations.find(x=>x.id===filterId);
-    if(c) renderConsult(c);
-
-  } else if(mode==="one_illness") {
-    const il = illnesses.find(x=>x.id===filterId);
-    if(il) renderIllness(il);
-
-  } else if(mode==="consultas") {
-    let list = consultations;
-    if(filterSpec) list = list.filter(c=>(c.specialist+c.specialty).toLowerCase().includes(filterSpec.toLowerCase()));
-    list = list.sort((a,b)=>new Date(b.date)-new Date(a.date));
-    sectionHeader(`Consultas médicas${filterSpec?" — "+filterSpec:""}`, "");
-    if(!list.length){ setColor(C_MED); doc.setFontSize(9); doc.text("Sin consultas registradas.", ML, y); y+=8; }
-    list.forEach(c=>renderConsult(c));
-
-  } else if(mode==="illness") {
-    const list = illnesses.sort((a,b)=>new Date(b.startDate)-new Date(a.startDate));
-    sectionHeader("Enfermedades y tratamientos", "");
-    if(!list.length){ setColor(C_MED); doc.setFontSize(9); doc.text("Sin enfermedades registradas.", ML, y); y+=8; }
-    list.forEach(il=>renderIllness(il));
-
-  } else if(mode==="all") {
-    // 1. Resumen del paciente
-    sectionHeader("Datos del paciente");
-    if(member.birthdate) field("Fecha de nacimiento", `${fmt(member.birthdate)}  (${getAge(member.birthdate)} años)`);
-    if(member.bloodType) field("Grupo sanguíneo", member.bloodType);
-    if(member.allergies) field("Alergias conocidas", member.allergies);
-
-    // 2. Turnos próximos
-    const upAppts = appointments.filter(a=>{const d=daysUntil(a.date);return d!==null&&d>=0;}).sort((a,b)=>new Date(a.date)-new Date(b.date));
-    if(upAppts.length){
-      sectionHeader("Turnos y recordatorios");
-      upAppts.forEach(a=>{
-        checkPage(12);
-        const days=daysUntil(a.date);
-        setFill(days===0?[255,235,230]:days<=3?[255,251,235]:[240,251,244]);
-        doc.roundedRect(ML, y, CW, 10, 1.5,1.5,"F");
-        doc.setFont("helvetica","bold"); doc.setFontSize(9.5); setColor(C_DARK);
-        doc.text(`${a.type==="recordatorio"?"[Rec.]":"[Turno]"} ${a.title}`, ML+4, y+4);
-        doc.setFont("helvetica","normal"); doc.setFontSize(8.5); setColor(C_MED);
-        doc.text(`${a.specialist||""}  ·  ${fmt(a.date)}${a.time?" "+a.time:""}`, ML+4, y+8.5);
-        doc.setFont("helvetica","bold"); doc.setFontSize(8); setColor(days<=3?C_ACC:C_GRN);
-        doc.text(days===0?"HOY":days===1?"MAÑANA":`en ${days}d`, PW-MR-2, y+6, {align:"right"});
-        y+=13;
-      });
-    }
-
-    // 3. Consultas
-    const consList = consultations.sort((a,b)=>new Date(b.date)-new Date(a.date));
-    if(consList.length){
-      sectionHeader("Consultas médicas");
-      consList.forEach(c=>renderConsult(c));
-    }
-
-    // 4. Enfermedades
-    const illList = illnesses.sort((a,b)=>new Date(b.startDate)-new Date(a.startDate));
-    if(illList.length){
-      sectionHeader("Enfermedades y tratamientos");
-      illList.forEach(il=>renderIllness(il));
-    }
-
-    // 5. Vacunas
-    const applied = appliedVaccines || [];
-    const allV = allVaccinesForMember(member);
-    const appV = allV.filter(v=>applied.includes(v.key));
-    const pendV = allV.filter(v=>!applied.includes(v.key));
-    sectionHeader("Vacunación — Calendario Nacional Argentina");
-    if(appV.length){
-      checkPage(8); doc.setFont("helvetica","bold"); doc.setFontSize(9); setColor(C_GRN);
-      doc.text(`Vacunas aplicadas: ${appV.length}/${allV.length}`, ML, y); y+=7;
-      appV.forEach(v=>{
-        checkPage(7);
-        doc.setFont("helvetica","normal"); doc.setFontSize(8.5); setColor(C_DARK);
-        doc.text(`✓  ${v.vaccine}  —  ${v.dosis}`, ML+3, y); y+=5.5;
-      });
-      y+=3;
-    }
-    if(pendV.length){
-      checkPage(8); doc.setFont("helvetica","bold"); doc.setFontSize(9); setColor(C_ACC);
-      doc.text(`Vacunas pendientes: ${pendV.length}`, ML, y); y+=7;
-      pendV.forEach(v=>{
-        checkPage(7);
-        const late=v.days<0;
-        doc.setFont("helvetica","normal"); doc.setFontSize(8.5); setColor(late?C_ACC:C_DARK);
-        doc.text(`${late?"⚠":"○"}  ${v.vaccine}  —  ${v.dosis}  (${fmt(v.dueDate)})`, ML+3, y); y+=5.5;
-      });
-    }
-  }
-
-  // ── FOOTER on all pages ──
-  const totalPages = doc.getNumberOfPages();
-  for(let i=1;i<=totalPages;i++){
-    doc.setPage(i);
-    setFill([245,243,239]); doc.rect(0, PH-10, PW, 10, "F");
-    doc.setFont("helvetica","normal"); doc.setFontSize(7); setColor(C_MED);
-    doc.text("Salud Familiar — Documento generado para uso personal. No reemplaza criterio médico profesional.", ML, PH-4);
-    doc.text(`${i} / ${totalPages}`, PW-MR, PH-4, {align:"right"});
-  }
-
-  return doc;
-}
-
-// All vaccines for a member with applied filter
-function allVaccinesForMember(member) {
-  if(!member.birthdate) return [];
-  const birth = new Date(member.birthdate);
-  return VACCINE_SCHEDULE.map(v => {
-    const dueDate = toISO(addMonths(birth, v.ageMonths));
-    return { ...v, dueDate, days: daysUntil(dueDate), key: vacKey(v), memberId: member.id };
-  });
-}
-// Pending vaccines (not applied, within 6 months or overdue)
-function pendingVaccines(member, applied=[]) {
-  return allVaccinesForMember(member)
-    .filter(v => !applied.includes(v.key) && v.days <= 180)
-    .sort((a,b) => a.days - b.days);
+  if (p <  refs[0]) return { pct:"<p3",    label:"Muy bajo peso", color:"#E07A5F" };
+  if (p <  refs[1]) return { pct:"p3-15",  label:"Bajo peso",     color:"#C9A96E" };
+  if (p <  refs[2]) return { pct:"p15-50", label:"Normal",        color:"#5B8C5A" };
+  if (p <  refs[3]) return { pct:"p50-85", label:"Normal",        color:"#5B8C5A" };
+  if (p <= refs[4]) return { pct:"p85-97", label:"Normal alto",   color:"#5B8C5A" };
+  return                    { pct:">p97",   label:"Alto peso",     color:"#C9A96E" };
 }
 
 // ── Initial data ──
@@ -967,6 +725,7 @@ export default function App() {
                     }
                     <div style={S.mName}>{mb.name}</div>
                     {mb.birthdate&&<div style={S.mAge}>{getAge(mb.birthdate)} años</div>}
+                    {mb.dni&&<div style={{fontSize:10,color:"#aaa"}}>DNI {mb.dni}</div>}
                     <div style={S.mStats}>
                       <span>📋 {nc}</span>
                       <span>📅 {na}</span>
@@ -1002,6 +761,7 @@ export default function App() {
                 <h1 style={S.heroName}>{member.name}</h1>
                 {member.birthdate&&<p style={S.heroSub}>{fmt(member.birthdate)} · {getAge(member.birthdate)} años</p>}
                 {member.bloodType&&<p style={{...S.heroSub,marginTop:2}}>🩸 {member.bloodType}{member.allergies?` · ⚠️ ${member.allergies}`:""}</p>}
+                {member.dni&&<p style={{...S.heroSub,marginTop:2}}>🪪 DNI: {member.dni}</p>}
                 {member.sexo==="F"&&(member.embarazos||member.primeraMenstruacion)&&(
                   <p style={{...S.heroSub,marginTop:2}}>
                     🌸 {member.embarazos?`${member.embarazos} embarazo${member.embarazos>1?"s":""}`:""}{member.partosTermino?` · ${member.partosTermino} a término`:""}{member.tipoParto?` · ${member.tipoParto}`:""}
@@ -1739,7 +1499,7 @@ const F=({l,v,color})=><div style={{marginTop:8,fontSize:13,color:color||"#4a556
 //  MEMBER MODAL
 // ══════════════════════════════════════════
 function MemberModal({initial,onSave,onClose}) {
-  const [f,setF]=useState({id:initial?.id||null,name:initial?.name||"",avatar:initial?.avatar||"👤",color:initial?.color||COLORS[0],birthdate:initial?.birthdate||"",photo:initial?.photo||"",bloodType:initial?.bloodType||"",allergies:initial?.allergies||"",sexo:initial?.sexo||"M",primeraMenstruacion:initial?.primeraMenstruacion||"",embarazos:initial?.embarazos||"",partosTermino:initial?.partosTermino||"",tipoParto:initial?.tipoParto||"",complicacionesEmbarazo:initial?.complicacionesEmbarazo||""});
+  const [f,setF]=useState({id:initial?.id||null,name:initial?.name||"",avatar:initial?.avatar||"👤",color:initial?.color||COLORS[0],birthdate:initial?.birthdate||"",photo:initial?.photo||"",bloodType:initial?.bloodType||"",allergies:initial?.allergies||"",sexo:initial?.sexo||"M",dni:initial?.dni||"",primeraMenstruacion:initial?.primeraMenstruacion||"",embarazos:initial?.embarazos||"",partosTermino:initial?.partosTermino||"",tipoParto:initial?.tipoParto||"",complicacionesEmbarazo:initial?.complicacionesEmbarazo||""});
   const [photoErr, setPhotoErr] = useState("");
   const s=(k,v)=>setF(p=>({...p,[k]:v}));
 
@@ -1826,6 +1586,8 @@ function MemberModal({initial,onSave,onClose}) {
         </div>
         <div style={{flex:1}}><Lb>Alergias conocidas</Lb><input style={S.inp} value={f.allergies} onChange={e=>s("allergies",e.target.value)} placeholder="Ej: Penicilina, Polen..."/></div>
       </div>
+      <Lb>DNI</Lb>
+      <input style={S.inp} value={f.dni||""} onChange={e=>s("dni",e.target.value)} placeholder="Ej: 12.345.678"/>
       {/* Datos ginecológicos — solo para mujeres */}
       {f.sexo==="F"&&<>
         <div style={{marginTop:12,marginBottom:4,paddingTop:12,borderTop:"1px solid #EDE9E3"}}>
