@@ -73,6 +73,21 @@ function ageMonthsAt(birthStr, measStr) {
 }
 const vacKey = v => `${v.vaccine}||${v.dosis}`;
 
+function allVaccinesForMember(member) {
+  if(!member.birthdate) return [];
+  const birth = new Date(member.birthdate);
+  return VACCINE_SCHEDULE.map(v => {
+    const dueDate = toISO(addMonths(birth, v.ageMonths));
+    return { ...v, dueDate, days: daysUntil(dueDate), key: vacKey(v), memberId: member.id };
+  });
+}
+// Pending vaccines (not applied, within 6 months or overdue)
+function pendingVaccines(member, applied=[]) {
+  return allVaccinesForMember(member)
+    .filter(v => !applied.includes(v.key) && v.days <= 180)
+    .sort((a,b) => a.days - b.days);
+}
+
 // ── IMC & Crecimiento ──
 function calcIMC(peso, talla) {
   if (!peso || !talla) return null;
