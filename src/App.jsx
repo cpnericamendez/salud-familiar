@@ -1038,8 +1038,9 @@ export default function App() {
                     {imc && (
                       <div style={{flex:1,minWidth:100,background:imcInfo.color+"22",borderRadius:12,padding:"12px 14px",boxShadow:"0 1px 5px rgba(0,0,0,.05)",textAlign:"center"}}>
                         <div style={{fontSize:22,fontWeight:700,color:imcInfo.color}}>{imc}</div>
-                        <div style={{fontSize:11,color:imcInfo.color,fontWeight:600}}>{imcInfo.label}</div>
-                        {!isChild&&<div style={{fontSize:9,color:"#aaa"}}>IMC</div>}
+                        <div style={{fontSize:11,color:"#888",fontWeight:600}}>IMC</div>
+                        {!isChild&&<div style={{fontSize:11,color:imcInfo.color,fontWeight:600}}>{imcInfo.label}</div>}
+                        {isChild&&<div style={{fontSize:9,color:"#aaa"}}>Referencia adultos</div>}
                       </div>
                     )}
                     {pctInfo && (
@@ -1154,11 +1155,12 @@ export default function App() {
                             <div style={{fontSize:13,fontWeight:600,color:"#3D405B"}}>{fmt(m.date)}{m.ageLabel&&<span style={{fontSize:11,color:"#4A90A4",marginLeft:8}}>({m.ageLabel})</span>}</div>
                             <div style={{fontSize:12,color:"#888"}}>
                               {m.peso&&`${m.peso} kg`}{m.talla&&` · ${m.talla} cm`}
-                              {ic&&<span style={{color:ii.color,marginLeft:6,fontWeight:600}}>IMC {ic} — {ii.label}</span>}
+                              {ic&&<span style={{color:"#888",marginLeft:6}}>IMC {ic}{!isChild?" — "+ii.label:""}</span>}
                               {pc&&<span style={{color:pc.color,marginLeft:6,fontWeight:600}}>{pc.pct}</span>}
                             </div>
                             {m.notes&&<div style={{fontSize:11,color:"#aaa",marginTop:2}}>{m.notes}</div>}
                           </div>
+                          <button style={{...S.iBtnSm}} onClick={()=>{setEditItem({...m,_memberId:member.id});setModal("measurement");}}>✏️</button>
                           <button style={{...S.iBtnSm,color:"#E07A5F"}} onClick={()=>delMeasurement(member.id,m.id)}>🗑️</button>
                         </div>
                       );
@@ -1237,6 +1239,7 @@ export default function App() {
       {/* MODALS */}
       {modal==="measurement"&&member&&<MeasurementModal
         member={member}
+        initial={editItem?._memberId?editItem:null}
         onSave={m=>{ saveMeasurement(member.id,m); closeModal(); }}
         onClose={closeModal}/>}
       {modal==="customVac"&&member&&<CustomVaccineModal
@@ -1300,9 +1303,12 @@ function IllnessCard({il, onEdit, onDelete, onToggle}) {
               <div style={{fontSize:12,fontWeight:700,color:"#3D405B",marginBottom:8}}>💊 Medicamentos y horarios</div>
               {il.medications.map((med,i)=>(
                 <div key={i} style={S.medCard}>
-                  <div style={S.medHeader}>
-                    <span style={S.medName}>💊 {med.name}</span>
-                    <span style={S.medDose}>{med.dose}</span>
+                  <div style={{...S.medHeader,alignItems:"flex-start"}}>
+                    <div style={{flex:1}}>
+                      <span style={S.medName}>💊 {med.name}</span>
+                      <span style={S.medDose}>{med.dose}</span>
+                    </div>
+                    <button style={{...S.iBtnSm,fontSize:11,marginLeft:6}} onClick={e=>{e.stopPropagation();onEdit();}}>✏️ Editar</button>
                   </div>
                   <div style={S.medFreq}>🕐 {med.frequency}</div>
                   {med.times?.length>0&&(
@@ -1808,9 +1814,15 @@ const Lb=({children})=><label style={S.lbl}>{children}</label>;
 // ══════════════════════════════════════════
 //  MEASUREMENT MODAL
 // ══════════════════════════════════════════
-function MeasurementModal({ member, onSave, onClose }) {
+function MeasurementModal({ member, initial, onSave, onClose }) {
   const isChild = member.birthdate && Math.floor((Date.now()-new Date(member.birthdate).getTime())/(86400000*365.25)) < 18;
-  const [f, setF] = useState({ date: new Date().toISOString().split("T")[0], peso:"", talla:"", notes:"" });
+  const [f, setF] = useState({
+    id: initial?.id||null,
+    date: initial?.date||new Date().toISOString().split("T")[0],
+    peso: initial?.peso||"",
+    talla: initial?.talla||"",
+    notes: initial?.notes||""
+  });
   const s=(k,v)=>setF(p=>({...p,[k]:v}));
   const imc = f.peso&&f.talla ? calcIMC(f.peso,f.talla) : null;
   const imcInfo = imcLabel(imc);
@@ -1824,7 +1836,7 @@ function MeasurementModal({ member, onSave, onClose }) {
     return rem>0?`${years} años ${rem} meses`:`${years} años`;
   })() : null;
   return (
-    <Mdl title="Registrar medición" onClose={onClose}>
+    <Mdl title={f.id?"Editar medición":"Registrar medición"} onClose={onClose}>
       <Lb>Fecha de la medición</Lb>
       <input type="date" style={S.inp} value={f.date} onChange={e=>s("date",e.target.value)}/>
       {ageAtMeas&&<div style={{background:"#EEF7FF",border:"1px solid #C3D8F5",borderRadius:8,padding:"6px 12px",marginBottom:6,fontSize:12,color:"#2C5F8A",fontWeight:600}}>📅 Edad en esta medición: {ageAtMeas}</div>}
