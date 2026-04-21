@@ -1354,8 +1354,13 @@ function IllnessModal({initial, members, onSave, onClose}) {
 
   function addMed() {
     if(!med.name) return;
-    const times=med.times.filter(t=>t.trim());
-    s("medications",[...f.medications,{...med,times}]);
+    const times = med.times.filter(t=>t.trim());
+    const cleanMed = {name:med.name,dose:med.dose,frequency:med.frequency,times,startDate:med.startDate,endDate:med.endDate,notes:med.notes};
+    if(med._editIndex !== undefined) {
+      s("medications", f.medications.map((m,i)=>i===med._editIndex ? cleanMed : m));
+    } else {
+      s("medications", [...f.medications, cleanMed]);
+    }
     setMed({name:"",dose:"",frequency:FREQ_OPTIONS[2],times:[""],startDate:"",endDate:"",notes:""});
     setShowMedForm(false);
   }
@@ -1406,7 +1411,13 @@ function IllnessModal({initial, members, onSave, onClose}) {
                 <div style={S.medFreq}>🕐 {m.frequency}</div>
                 {m.times?.filter(t=>t).length>0&&<div style={S.medTimes}>{m.times.filter(t=>t).map((t,ti)=><span key={ti} style={S.medTimeTag}>⏰ {t}</span>)}</div>}
               </div>
-              <button style={{...S.iBtnSm,color:"#E07A5F"}} onClick={()=>removeMed(i)}>🗑️</button>
+              <div style={{display:"flex",gap:4}}>
+                <button style={{...S.iBtnSm}} onClick={()=>{
+                  setMed({...m, _editIndex: i});
+                  setShowMedForm(true);
+                }}>✏️</button>
+                <button style={{...S.iBtnSm,color:"#E07A5F"}} onClick={()=>removeMed(i)}>🗑️</button>
+              </div>
             </div>
           </div>
         ))}
@@ -1441,7 +1452,7 @@ function IllnessModal({initial, members, onSave, onClose}) {
             <Lb>Notas</Lb>
             <input style={S.inp} value={med.notes} onChange={e=>sm("notes",e.target.value)} placeholder="Ej: Tomar con comida, agitar antes de usar..."/>
             <div style={{display:"flex",gap:8,marginTop:8}}>
-              <button style={{flex:1,padding:10,background:"#3D405B",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:600}} onClick={addMed}>Agregar medicamento</button>
+              <button style={{flex:1,padding:10,background:"#3D405B",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:600}} onClick={addMed}>{med._editIndex!==undefined?"Guardar cambios":"Agregar medicamento"}</button>
               <button style={{padding:10,background:"#EDE9E3",color:"#3D405B",border:"none",borderRadius:8,cursor:"pointer"}} onClick={()=>setShowMedForm(false)}>Cancelar</button>
             </div>
           </div>
