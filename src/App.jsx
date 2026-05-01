@@ -329,6 +329,7 @@ export default function App() {
   const [page, setPage]           = useState("home");
   const [memberId, setMemberId]   = useState(null);
   const [memberTab, setMemberTab] = useState("consultas");
+  const [selectedDoctor, setSelectedDoctor] = useState(null); // {specialist, specialty}
   const [modal, setModal]         = useState(null);
   const [editItem, setEditItem]   = useState(null);
   const [pdfModal, setPdfModal]   = useState(false);
@@ -519,6 +520,14 @@ export default function App() {
     ...d, measurements: { ...d.measurements, [membId]: (d.measurements?.[membId]||[]).filter(x=>x.id!==id) }
   }));
 
+  // Medication takes tracking
+  const toggleMedTake = (key) => {
+    setDataTS(d => ({
+      ...d,
+      medTakes: { ...d.medTakes, [key]: !d.medTakes?.[key] }
+    }));
+  };
+
   // Antecedentes familiares CRUD
   const saveAntecedentes = (membId, ant) => {
     setDataTS(d => ({ ...d, antecedentes: { ...d.antecedentes, [membId]: ant } }));
@@ -632,8 +641,24 @@ export default function App() {
           <label title="Importar backup" style={{fontSize:18,cursor:"pointer",padding:"2px 4px",opacity:.7}}>
             📂<input type="file" accept=".json" style={{display:"none"}} onChange={importBackup}/>
           </label>
+          <button title="Cambiar PIN" onClick={()=>{
+            const newPin = prompt("Nuevo PIN (4 dígitos):");
+            if(newPin&&/^\d{4}$/.test(newPin)){
+              localStorage.setItem("sfv_pin",newPin);
+              alert("✅ PIN actualizado");
+            } else if(newPin) {
+              alert("El PIN debe tener exactamente 4 dígitos");
+            }
+          }} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",padding:"2px 4px",opacity:.7}}>🔐</button>
         </div>
       </header>
+
+      {/* PIN Lock Screen */}
+      {!unlocked&&<PinLock onUnlock={()=>{
+        sessionStorage.setItem("sfv_unlocked","1");
+        setUnlocked(true);
+      }}/>}
+      {unlocked&&<>
 
       {/* Toast notification banner */}
       {toastMsg&&(
@@ -826,15 +851,76 @@ export default function App() {
             </div>
 
             {/* CONSULTAS */}
-            {memberTab==="consultas"&&<>
-              <div style={S.toolbar}>
-                <input style={{...S.srch,flex:1,marginBottom:0}} placeholder="Buscar por especialista..." value={search} onChange={e=>setSearch(e.target.value)}/>
-                <button style={S.addBtn} onClick={()=>{setEditItem({memberId:member.id});setModal("consult");}}>+ Nueva</button>
-              </div>
-              {filteredConsults.length===0?<p style={S.empty}>Sin consultas cargadas.</p>
-                :filteredConsults.map(c=><CCard key={c.id} c={c} onEdit={()=>{setEditItem(c);setModal("consult");}} onDelete={()=>delConsult(c.id)}/>)}
-            </>}
+             {memberTab==="consultas"&&(()=>{
+               const memberConsults = (data.consultations||[]).filter(c=>c.memberId===member.id);
+               // Group by doctor (specialist + specialty)
+               const doctorMap = {};
+               memberConsults.forEach(c=>{
+                 const key = (c.specialist||"Sin médico").trim();
+                 if(!doctorMap[key]) doctorMap[key] = {specialist:c.specialist||"Sin médico", specialty:c.specialty||"", visits:[]};
+                 doctorMap[key].visits.push(c);
+               });
+               const doctors = Object.values(doctorMap).sort((a,b)=>{
+                 const lastA = Math.max(...a.visits.map(v=>new Date(v.date)));
+                 const lastB = Math.max(...b.visits.map(v=>new Date(v.date)));
+                 return lastB - lastA;
+               });
 
+               // If a doctor is selected, show their visits
+               if(selectedDoctor) {
+                 const doc = doctorMap[selectedDoctor];
+                 const visits = (doc?.visits||[]).sort((a,b)=>new Date(b.date)-new Date(a.date));
+                 return <>
+                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                     <button style={{background:"none",border:"none",color:"#4A90A4",cursor:"pointer",fontSize:13,fontWeight:600,padding:0}}
+                       onClick={()=>setSelectedDoctor(null)}>← Todos los médicos</button>
+                   </div>
+                   <div style={{background:"#F5F3EF",borderRadius:12,padding:"12px 14px",marginBottom:14}}>
+                     <div style={{fontSize:15,fontWeight:700,color:"#3D405B"}}>👨‍⚕️ {selectedDoctor}</div>
+                     {doc?.specialty&&<div style={{fontSize:12,color:"#888"}}>{doc.specialty}</div>}
+                     <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{visits.length} visita{visits.length!==1?"s":""}</div>
+                   </div>
+                   <button style={{...S.addBtn,width:"100%",marginBottom:12}}
+                     onClick={()=>{setEditItem({memberId:member.id,specialist:selectedDoctor,specialty:doc?.specialty||""});setModal("consult");}}>
+                     + Nueva consulta con este médico
+                   </button>
+                   {visits.length===0?<p style={S.empty}>Sin consultas cargadas.</p>
+                     :visits.map(c=><CCard key={c.id} c={c} onEdit={()=>{setEditItem(c);setModal("consult");}} onDelete={()=>delConsult(c.id)}/>)
+                   }
+                 </>;
+               }
+
+               // Doctor list view
+               return <>
+                 <button style={{...S.addBtn,width:"100%",marginBottom:12}}
+                   onClick={()=>{setEditItem({memberId:member.id});setModal("consult");}}>
+                   + Nueva consulta
+                 </button>
+                 {doctors.length===0
+                   ?<p style={S.empty}>Sin consultas cargadas.</p>
+                   :doctors.map(doc=>{
+                     const lastVisit = doc.visits.sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+                     return (
+                       <div key={doc.specialist}
+                         style={{background:"#fff",borderRadius:12,padding:"12px 14px",marginBottom:8,
+                           boxShadow:"0 1px 5px rgba(0,0,0,.05)",cursor:"pointer",display:"flex",alignItems:"center",gap:12}}
+                         onClick={()=>setSelectedDoctor(doc.specialist)}>
+                         <div style={{width:44,height:44,borderRadius:22,background:member.color+"22",
+                           display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>👨‍⚕️</div>
+                         <div style={{flex:1,minWidth:0}}>
+                           <div style={{fontSize:14,fontWeight:700,color:"#3D405B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{doc.specialist}</div>
+                           {doc.specialty&&<div style={{fontSize:11,color:"#888"}}>{doc.specialty}</div>}
+                           <div style={{fontSize:11,color:"#aaa",marginTop:2}}>
+                             {doc.visits.length} visita{doc.visits.length!==1?"s":""} · Última: {fmt(lastVisit?.date)}
+                           </div>
+                         </div>
+                         <span style={{color:"#bbb",fontSize:16}}>›</span>
+                       </div>
+                     );
+                   })
+                 }
+               </>;
+             })()}
             {/* TURNOS */}
             {memberTab==="turnos"&&<>
               <div style={S.toolbar}>
@@ -1176,7 +1262,7 @@ export default function App() {
                 <button style={S.addBtn} onClick={()=>{setEditItem({memberId:member.id,active:true});setModal("illness");}}>+ Registrar enfermedad</button>
               </div>
               {memberIllnesses.length===0?<p style={S.empty}>Sin enfermedades registradas.</p>
-                :memberIllnesses.map(il=><IllnessCard key={il.id} il={il} onEdit={()=>{setEditItem(il);setModal("illness");}} onDelete={()=>delIllness(il.id)} onToggle={()=>toggleIllnessActive(il.id)}/>)}
+                :memberIllnesses.map(il=><IllnessCard key={il.id} il={il} onEdit={()=>{setEditItem(il);setModal("illness");}} onDelete={()=>delIllness(il.id)} onToggle={()=>toggleIllnessActive(il.id)} medTakes={data.medTakes} onToggleTake={toggleMedTake}/>)}
             </>}
 
             {/* ANTECEDENTES FAMILIARES */}
@@ -1249,7 +1335,8 @@ export default function App() {
         onClose={closeModal}/>}
       {modal==="member"   &&<MemberModal   initial={editItem} onSave={saveMember}  onClose={closeModal}/>}
       {modal==="appt"     &&<ApptModal     initial={editItem} members={data.members} onSave={saveAppt} onClose={closeModal}/>}
-      {modal==="consult"  &&<ConsultModal  initial={editItem} members={data.members} onSave={saveConsult} onClose={closeModal}/>}
+      {modal==="consult"  &&<ConsultModal  initial={editItem} members={data.members} onSave={saveConsult} onClose={closeModal}
+        onSaveAsIllness={ill=>{ saveIllness(ill); alert("✅ Diagnóstico pasado a Enfermedades"); }}/>}
       {modal==="illness"  &&<IllnessModal  initial={editItem} members={data.members} onSave={saveIllness} onClose={closeModal}/>}
       {pdfModal&&member&&<PDFExportModal
         member={member}
@@ -1259,6 +1346,7 @@ export default function App() {
         appliedVaccines={data.appliedVaccines?.[member.id]||[]}
         onClose={()=>setPdfModal(false)}
       />}
+    </>}
     </div>
   );
 }
@@ -1324,6 +1412,10 @@ function IllnessCard({il, onEdit, onDelete, onToggle}) {
               ))}
             </div>
           )}
+          {/* Medication Calendar - only for active illnesses with timed meds */}
+          {il.active&&(il.medications||[]).some(m=>m.times?.filter(t=>t).length>0)&&(
+            <MedCalendar illness={il} medTakes={medTakes} onToggle={onToggleTake}/>
+          )}
         </div>
       )}
     </div>
@@ -1361,7 +1453,7 @@ function IllnessModal({initial, members, onSave, onClose}) {
     } else {
       s("medications", [...f.medications, cleanMed]);
     }
-    setMed({name:"",dose:"",frequency:FREQ_OPTIONS[2],times:[""],startDate:"",endDate:"",notes:""});
+    setMed({name:"",dose:"",frequency:FREQ_OPTIONS[2],times:[""],startDate:"",endDate:"",durationDays:"",notes:""});
     setShowMedForm(false);
   }
   function removeMed(i){s("medications",f.medications.filter((_,j)=>j!==i));}
@@ -1804,6 +1896,24 @@ function ConsultModal({initial,members,onSave,onClose}) {
         </div>
       )}
 
+      {f.diagnosis&&(
+        <button style={{...S.saveBtn,background:"#81B29A",marginBottom:8}}
+          onClick={()=>{
+            if(!f.diagnosis) return;
+            onSaveAsIllness({
+              memberId: f.memberId,
+              name: f.diagnosis.slice(0,60),
+              symptoms: f.reason||"",
+              treatment: f.nextSteps||"",
+              doctor: f.specialist||"",
+              medications: f.medications||[],
+              active: true,
+              startDate: f.date||"",
+            });
+          }}>
+          🤒 Pasar diagnóstico a Enfermedades
+        </button>
+      )}
       <button style={S.saveBtn} onClick={()=>f.specialist&&f.date&&onSave(f)}>Guardar consulta</button>
     </Mdl>
   );
@@ -2451,6 +2561,185 @@ function BoosterBtn({ onSave }) {
         onClick={()=>{if(date){onSave(date);setShow(false);}}}> Guardar</button>
       <button style={{fontSize:11,background:"none",border:"none",color:"#aaa",cursor:"pointer"}}
         onClick={()=>setShow(false)}>✕</button>
+    </div>
+  );
+}
+
+
+// ══════════════════════════════════════════
+//  MEDICATION CALENDAR — daily take tracker
+// ══════════════════════════════════════════
+function MedCalendar({ illness, medTakes, onToggle }) {
+  const [viewDate, setViewDate] = useState(localToday());
+  const activeMeds = (illness.medications||[]).filter(m => m.name && m.times?.filter(t=>t).length > 0);
+
+  if(!activeMeds.length) return (
+    <div style={{fontSize:12,color:"#aaa",padding:"8px 0"}}>
+      Agregá horarios a los medicamentos para ver el calendario de tomas.
+    </div>
+  );
+
+  function makeKey(medIdx, time) {
+    return `${illness.id}_${medIdx}_${viewDate}_${time.replace(/:/g,"h")}`;
+  }
+
+  // Calculate treatment end date
+  function getEndDate(med) {
+    if(med.endDate) return med.endDate;
+    if(!med.startDate || !med.durationDays) return null;
+    const d = new Date(med.startDate);
+    d.setDate(d.getDate() + parseInt(med.durationDays));
+    return d.toISOString().split("T")[0];
+  }
+
+  // Count today's takes
+  const totalToday = activeMeds.reduce((sum,m) => sum + (m.times?.filter(t=>t).length||0), 0);
+  const takenToday = activeMeds.reduce((sum,m,mi) =>
+    sum + (m.times?.filter(t=>t)||[]).filter(t => medTakes?.[makeKey(mi,t)]).length, 0);
+
+  // Date navigation
+  function prevDay() {
+    const d = new Date(viewDate); d.setDate(d.getDate()-1);
+    setViewDate(d.toISOString().split("T")[0]);
+  }
+  function nextDay() {
+    const d = new Date(viewDate); d.setDate(d.getDate()+1);
+    if(d.toISOString().split("T")[0] <= localToday()) setViewDate(d.toISOString().split("T")[0]);
+  }
+  const isToday = viewDate === localToday();
+
+  return (
+    <div style={{marginTop:10,borderTop:"1px solid #EDE9E3",paddingTop:10}}>
+      {/* Header with date nav */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+        <button style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:"#3D405B"}} onClick={prevDay}>‹</button>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#3D405B"}}>
+            {isToday?"HOY":fmt(viewDate)}
+          </div>
+          <div style={{fontSize:11,color:takenToday===totalToday&&totalToday>0?"#5B8C5A":"#888"}}>
+            {takenToday}/{totalToday} tomas {takenToday===totalToday&&totalToday>0?"✅":""}
+          </div>
+        </div>
+        <button style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:isToday?"#ccc":"#3D405B",pointerEvents:isToday?"none":"auto"}} onClick={nextDay}>›</button>
+      </div>
+
+      {/* Progress bar */}
+      {totalToday>0&&(
+        <div style={{height:6,background:"#EDE9E3",borderRadius:3,overflow:"hidden",marginBottom:12}}>
+          <div style={{height:"100%",background:"#5B8C5A",borderRadius:3,
+            width:`${Math.round(takenToday/totalToday*100)}%`,transition:"width .3s"}}/>
+        </div>
+      )}
+
+      {/* Med takes */}
+      {activeMeds.map((med,mi)=>{
+        const times = med.times?.filter(t=>t)||[];
+        const endDate = getEndDate(med);
+        const isExpired = endDate && viewDate > endDate;
+        return (
+          <div key={mi} style={{marginBottom:10}}>
+            <div style={{fontSize:12,fontWeight:600,color:isExpired?"#aaa":"#3D405B",marginBottom:5}}>
+              💊 {med.name} {med.dose&&<span style={{fontWeight:400,color:"#888"}}>· {med.dose}</span>}
+              {endDate&&<span style={{fontSize:10,color:isExpired?"#E07A5F":"#5B8C5A",marginLeft:6}}>
+                {isExpired?"Tratamiento terminado":"Hasta: "+fmt(endDate)}
+              </span>}
+            </div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {times.map((t,ti)=>{
+                const key = makeKey(mi,t);
+                const taken = !!medTakes?.[key];
+                return (
+                  <button key={ti}
+                    style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",
+                      borderRadius:20,border:`2px solid ${taken?"#5B8C5A":"#EDE9E3"}`,
+                      background:taken?"#E8F5EC":"#fff",cursor:"pointer",fontSize:12,fontWeight:600,
+                      color:taken?"#3D6B54":"#888"}}
+                    onClick={()=>onToggle(key)}>
+                    {taken?"✅":"⬜"} {t||`Toma ${ti+1}`}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
+// ══════════════════════════════════════════
+//  PIN LOCK SCREEN
+// ══════════════════════════════════════════
+const DEFAULT_PIN = "1234"; // Cambiá este número por tu PIN personal
+
+function PinLock({ onUnlock }) {
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState(false);
+  const [shake, setShake] = useState(false);
+
+  function tryPin(p) {
+    const stored = localStorage.getItem("sfv_pin") || DEFAULT_PIN;
+    if(p === stored) {
+      setError(false);
+      onUnlock();
+    } else {
+      setError(true);
+      setShake(true);
+      setPin("");
+      setTimeout(()=>setShake(false), 600);
+    }
+  }
+
+  function pressKey(k) {
+    if(k==="del") { setPin(p=>p.slice(0,-1)); setError(false); return; }
+    const next = pin + k;
+    setPin(next);
+    if(next.length===4) { setTimeout(()=>tryPin(next), 100); }
+  }
+
+  const keys = ["1","2","3","4","5","6","7","8","9","","0","del"];
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"#3D405B",display:"flex",flexDirection:"column",
+      alignItems:"center",justifyContent:"center",zIndex:9999,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{fontSize:40,marginBottom:16}}>🏥</div>
+      <div style={{fontSize:20,fontWeight:700,color:"#fff",marginBottom:4}}>Salud Familiar</div>
+      <div style={{fontSize:13,color:"rgba(255,255,255,.6)",marginBottom:40}}>Ingresá tu PIN</div>
+
+      {/* PIN dots */}
+      <div style={{display:"flex",gap:16,marginBottom:8,
+        animation:shake?"shake .5s ease":"none"}}>
+        <style>{`@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}`}</style>
+        {[0,1,2,3].map(i=>(
+          <div key={i} style={{width:16,height:16,borderRadius:8,
+            background:pin.length>i?"#F2CC8F":"rgba(255,255,255,.3)",
+            transition:"background .15s"}}/>
+        ))}
+      </div>
+      {error&&<div style={{fontSize:12,color:"#E07A5F",marginBottom:8}}>PIN incorrecto</div>}
+      <div style={{height:20}}/>
+
+      {/* Keypad */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,72px)",gap:12}}>
+        {keys.map((k,i)=>(
+          <button key={i}
+            style={{height:72,borderRadius:36,border:"none",cursor:k?"pointer":"default",
+              background:k?"rgba(255,255,255,.12)":"transparent",
+              color:"#fff",fontSize:k==="del"?18:24,fontWeight:600,
+              display:"flex",alignItems:"center",justifyContent:"center",
+              transition:"background .1s"}}
+            onClick={()=>k&&pressKey(k)}
+            onMouseDown={e=>e.currentTarget.style.background=k?"rgba(255,255,255,.25)":"transparent"}
+            onMouseUp={e=>e.currentTarget.style.background=k?"rgba(255,255,255,.12)":"transparent"}>
+            {k==="del"?"⌫":k}
+          </button>
+        ))}
+      </div>
+      <div style={{marginTop:32,fontSize:11,color:"rgba(255,255,255,.3)"}}>
+        PIN por defecto: 1234 · Cambialo en Configuración
+      </div>
     </div>
   );
 }
