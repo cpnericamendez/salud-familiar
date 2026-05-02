@@ -951,18 +951,24 @@ export default function App() {
                       {a.notes&&<div style={S.apptNote}>{a.notes}</div>}
                     </div>
                     <div style={{display:"flex",gap:3}}>
-                      {past&&<button style={{...S.iBtnSm,fontSize:12,background:"#F2CC8F33",border:"1px solid #C9A96E",borderRadius:6,padding:"2px 6px",color:"#7D5A30",whiteSpace:"nowrap"}}
+                      {(past||days===0)&&<button style={{...S.iBtnSm,fontSize:12,background:"#F2CC8F33",border:"1px solid #C9A96E",borderRadius:6,padding:"2px 6px",color:"#7D5A30",whiteSpace:"nowrap"}}
                         title="Registrar lo que pasó en esta consulta"
-                        onClick={()=>{
-                          setEditItem({
-                            memberId:a.memberId,
-                            date:a.date,
-                            specialist:a.specialist||"",
-                            specialty:"",
-                            reason:a.title||"",
-                          });
-                          setModal("consult");
-                        }}>📋 Consulta</button>}
+                         onClick={()=>{
+                           // Go to doctor view in consultas tab
+                           setMemberTab("consultas");
+                           if(a.specialist) {
+                             setSelectedDoctor(a.specialist);
+                           } else {
+                             setEditItem({
+                               memberId:a.memberId,
+                               date:a.date,
+                               specialist:a.specialist||"",
+                               specialty:"",
+                               reason:a.title||"",
+                             });
+                             setModal("consult");
+                           }
+                         }}>📋 Consulta</button>}
                       <button style={S.iBtnSm} onClick={()=>{setEditItem(a);setModal("appt");}}>✏️</button>
                       <button style={S.iBtnSm} onClick={()=>delAppt(a.id)}>🗑️</button>
                     </div>
