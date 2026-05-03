@@ -334,6 +334,7 @@ export default function App() {
   const [editItem, setEditItem]   = useState(null);
   const [pdfModal, setPdfModal]   = useState(false);
   const [toastMsg, setToastMsg]   = useState(null);
+  const [unlocked, setUnlocked]   = useState(()=>sessionStorage.getItem("sfv_unlocked")==="1");
   const [search, setSearch]       = useState("");
   const [reminderMode, setReminderMode] = useState("lista");
   const [calMonth, setCalMonth]   = useState(()=>{ const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; });
