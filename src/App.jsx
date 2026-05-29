@@ -673,6 +673,13 @@ export default function App() {
 
         {/* ══ HOME ══ */}
         {page==="home"&&<>
+          {/* Smart Input */}
+          <SmartInput
+            members={data.members}
+            onSaveAppt={a=>{ setDataTS(d=>({...d,appointments:[...d.appointments,{...a,id:Date.now()}]})); }}
+            onSaveConsult={c=>{ setDataTS(d=>({...d,consultations:[...d.consultations,{...c,id:Date.now()}]})); }}
+          />
+
           {/* Active illnesses banner */}
           {activeIllnesses.length>0&&(
             <div style={{...S.alertBox,background:"#FFF0F0",borderColor:"#F8BCBC"}}>
@@ -1587,6 +1594,14 @@ function CCard({c, member, onEdit, onDelete}) {
           {c.nextSteps&&<F l="Indicaciones" v={c.nextSteps}/>}
           {c.nextAppointment&&<F l="Próximo turno" v={`${fmt(c.nextAppointment)}${c.nextAppointmentNote?` — ${c.nextAppointmentNote}`:""}`} color="#5B8C5A"/>}
           {c.notes&&<F l="Notas" v={c.notes}/>}
+          {c.driveLink&&(
+            <a href={c.driveLink} target="_blank" rel="noopener noreferrer"
+              style={{display:"inline-flex",alignItems:"center",gap:5,marginTop:8,
+                fontSize:12,color:"#4A90A4",fontWeight:600,textDecoration:"none",
+                background:"#EEF7FF",padding:"5px 10px",borderRadius:8}}>
+              📎 Ver estudios en Drive
+            </a>
+          )}
           {c.studies?.length>0&&(
             <div style={{marginTop:8}}>
               <div style={{fontSize:12,fontWeight:600,color:"#3D405B",marginBottom:6}}>Estudios realizados</div>
@@ -1915,6 +1930,9 @@ function ConsultModal({initial,members,onSave,onClose}) {
           🤒 Pasar diagnóstico a Enfermedades
         </button>
       )}
+      <Lb>🔗 Link de estudios (Google Drive, opcional)</Lb>
+      <input style={S.inp} value={f.driveLink||""} onChange={e=>s("driveLink",e.target.value)}
+        placeholder="https://drive.google.com/..."/>
       <button style={S.saveBtn} onClick={()=>f.specialist&&f.date&&onSave(f)}>Guardar consulta</button>
     </Mdl>
   );
@@ -2741,6 +2759,216 @@ function PinLock({ onUnlock }) {
       <div style={{marginTop:32,fontSize:11,color:"rgba(255,255,255,.3)"}}>
         PIN por defecto: 1234 · Cambialo en Configuración
       </div>
+    </div>
+  );
+}
+
+
+// ══════════════════════════════════════════
+//  SMART INPUT — carga rápida por texto/voz
+// ══════════════════════════════════════════
+function SmartInput({ members, onSaveAppt, onSaveConsult }) {
+  const [text, setText] = useState("");
+  const [result, setResult] = useState(null); // parsed result preview
+  const [saved, setSaved]   = useState(false);
+  const [listening, setListening] = useState(false);
+
+  // ── Parse text for member name
+  function findMember(t) {
+    const lower = t.toLowerCase();
+    return members.find(m => lower.includes(m.name.toLowerCase())) || null;
+  }
+
+  // ── Parse date from text (Spanish)
+  function parseDate(t) {
+    const months = {
+      enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,
+      julio:7,agosto:8,septiembre:9,octubre:10,noviembre:11,diciembre:12
+    };
+    // "21 de septiembre" or "21/9" or "21-9"
+    const m1 = t.match(/(\d{1,2})\s+de\s+([a-záéíóú]+)/i);
+    if (m1) {
+      const day = m1[1].padStart(2,'0');
+      const mon = months[m1[2].toLowerCase()];
+      if (mon) {
+        const yr = new Date().getFullYear();
+        const date = `${yr}-${String(mon).padStart(2,'0')}-${day}`;
+        // If date is in the past, use next year
+        if (new Date(date) < new Date()) return `${yr+1}-${String(mon).padStart(2,'0')}-${day}`;
+        return date;
+      }
+    }
+    const m2 = t.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
+    if (m2) {
+      const yr = m2[3] ? (m2[3].length===2?'20'+m2[3]:m2[3]) : new Date().getFullYear();
+      return `${yr}-${m2[2].padStart(2,'0')}-${m2[1].padStart(2,'0')}`;
+    }
+    return new Date().toISOString().split('T')[0];
+  }
+
+  // ── Parse time from text
+  function parseTime(t) {
+    const m = t.match(/(\d{1,2})(?::(\d{2}))?\s*(?:hs?|horas?|:00)?/i);
+    if (m) return `${m[1].padStart(2,'0')}:${m[2]||'00'}`;
+    return '';
+  }
+
+  // ── Parse doctor name
+  function parseDoctor(t) {
+    const m = t.match(/(?:con|dr\.?|dra\.?)\s+([A-ZÁÉÍÓÚa-záéíóú]+(?:\s+[A-ZÁÉÍÓÚa-záéíóú]+)*)/i);
+    return m ? m[1].trim() : '';
+  }
+
+  // ── Parse specialty
+  function parseSpecialty(t) {
+    const specialties = ['pediatría','pediatria','cardiología','cardiologia','neurología',
+      'neurologia','oncología','oncologia','endocrinología','endocrinologia','oftalmología',
+      'oftalmologia','traumatología','traumatologia','ginecología','ginecologia','urología',
+      'urologia','dermatología','dermatologia','psicología','psicologia','nutrición','nutricion',
+      'fonoaudiología','fonoaudiologia','kinesiología','kinesiologia','odontología','odontologia',
+      'ortopedia','clínica','clinica','hematología','hematologia','otorrinolaringología',
+      'otorrinolaringologia','gastroenterología','gastroenterologia','infectología','infectologia'];
+    const lower = t.toLowerCase();
+    return specialties.find(s => lower.includes(s)) || '';
+  }
+
+  // ── Detect type
+  function detectType(t) {
+    const lower = t.toLowerCase();
+    if (lower.includes('turno') || lower.includes('cita') || lower.includes('sacar')) return 'appt';
+    if (lower.includes('consulta') || lower.includes('visita')) return 'consult';
+    return 'appt'; // default
+  }
+
+  // ── Parse full text
+  function parse(t) {
+    if (!t.trim()) return null;
+    const member = findMember(t);
+    const type   = detectType(t);
+    const date   = parseDate(t);
+    const time   = parseTime(t);
+    const doctor = parseDoctor(t);
+    const specialty = parseSpecialty(t);
+    return { member, type, date, time, doctor, specialty };
+  }
+
+  // ── Voice input
+  function startVoice() {
+    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+      alert('Tu navegador no soporta reconocimiento de voz. Escribí el texto manualmente.');
+      return;
+    }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    rec.lang = 'es-AR';
+    rec.interimResults = false;
+    rec.onstart = () => setListening(true);
+    rec.onresult = e => { setText(e.results[0][0].transcript); setListening(false); };
+    rec.onerror  = () => setListening(false);
+    rec.onend    = () => setListening(false);
+    rec.start();
+  }
+
+  // ── Register
+  function register() {
+    const p = parse(text);
+    if (!p || !p.member) {
+      alert('No pude identificar el integrante. Mencioná el nombre (ej: "Benicio", "Mamá").');
+      return;
+    }
+    const fmt = d => {
+      const [y,m,day] = d.split('-');
+      return `${day}/${m}/${y}`;
+    };
+    if (p.type === 'appt') {
+      onSaveAppt({
+        memberId: p.member.id,
+        title: p.specialty || p.doctor || 'Turno médico',
+        specialist: p.doctor,
+        date: p.date,
+        time: p.time,
+        type: 'turno',
+        location: '',
+        notes: text,
+      });
+    } else {
+      onSaveConsult({
+        memberId: p.member.id,
+        date: p.date,
+        specialist: p.doctor,
+        specialty: p.specialty,
+        reason: text,
+        diagnosis: '',
+        medications: '',
+        nextSteps: '',
+        notes: '',
+        driveLink: '',
+      });
+    }
+    setSaved(true);
+    const typeLabel = p.type==='appt' ? 'turno' : 'consulta';
+    setResult(`✅ ${typeLabel.charAt(0).toUpperCase()+typeLabel.slice(1)} registrado en la ficha de ${p.member.name}${p.date?' para el '+fmt(p.date):''}${p.doctor?' con '+p.doctor:''}`);
+    setText('');
+    setTimeout(() => { setSaved(false); setResult(null); }, 4000);
+  }
+
+  const preview = text.length > 3 ? parse(text) : null;
+
+  return (
+    <div style={{background:"#fff",borderRadius:16,padding:"14px 16px",marginBottom:14,
+      boxShadow:"0 2px 8px rgba(0,0,0,.07)",border:"1px solid #EDE9E3"}}>
+      <div style={{fontSize:12,fontWeight:700,color:"#3D405B",marginBottom:8}}>
+        ⚡ Registro rápido
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+        <textarea
+          value={text}
+          onChange={e=>{setText(e.target.value);setSaved(false);setResult(null);}}
+          placeholder="¿Qué turno o novedad médica querés registrar hoy? Ej: Turno para Benicio con Dra. Ktalenko de Endocrinología el 21 de septiembre a las 9:00"
+          rows={3}
+          style={{flex:1,padding:"10px 12px",borderRadius:10,border:"1px solid #EDE9E3",
+            fontSize:13,fontFamily:"inherit",resize:"none",outline:"none",lineHeight:1.5}}
+        />
+        <button
+          onClick={startVoice}
+          style={{background:listening?"#E07A5F":"#F5F3EF",border:"none",borderRadius:10,
+            width:44,height:44,fontSize:20,cursor:"pointer",flexShrink:0,
+            display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {listening ? "⏹" : "🎤"}
+        </button>
+      </div>
+
+      {/* Preview */}
+      {preview&&preview.member&&(
+        <div style={{marginTop:8,padding:"6px 10px",background:"#F5F3EF",borderRadius:8,
+          fontSize:11,color:"#666",display:"flex",gap:12,flexWrap:"wrap"}}>
+          <span>👤 <b>{preview.member.name}</b></span>
+          <span>📅 {preview.date?.split('-').reverse().join('/')}</span>
+          {preview.time&&<span>🕐 {preview.time}</span>}
+          {preview.doctor&&<span>👨‍⚕️ {preview.doctor}</span>}
+          {preview.specialty&&<span>🏥 {preview.specialty}</span>}
+          <span style={{color:preview.type==='appt'?"#C9A96E":"#5B8C5A"}}>
+            {preview.type==='appt'?'📋 Turno':'💬 Consulta'}
+          </span>
+        </div>
+      )}
+
+      {/* Result */}
+      {result&&(
+        <div style={{marginTop:8,padding:"8px 12px",background:"#E8F5EC",borderRadius:8,
+          fontSize:12,color:"#3D6B54",fontWeight:600}}>
+          {result}
+        </div>
+      )}
+
+      <button
+        onClick={register}
+        disabled={!text.trim()}
+        style={{marginTop:10,width:"100%",padding:"10px",background:text.trim()?"#3D405B":"#ccc",
+          color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:700,
+          cursor:text.trim()?"pointer":"default",transition:"background .2s"}}>
+        Registrar
+      </button>
     </div>
   );
 }
