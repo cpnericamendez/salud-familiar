@@ -855,60 +855,153 @@ export default function App() {
             </div>
 
             {/* CONSULTAS */}
-            {/* HISTORIAL MÉDICO — consultas + enfermedades */}
+            {/* HISTORIAL MÉDICO — todo bajo el médico */}
             {memberTab==="historial"&&(()=>{
-              const memberConsults=(data.consultations||[]).filter(c=>c.memberId===member.id);
-              const doctorMap={};
+              // Build doctor map from BOTH consultations and illnesses
+              const memberConsults  = (data.consultations||[]).filter(c=>c.memberId===member.id);
+              const memberIllnesses2 = (data.illnesses||[]).filter(il=>il.memberId===member.id);
+
+              const doctorMap = {};
+              function getOrCreate(key, specialist, specialty) {
+                if(!doctorMap[key]) doctorMap[key] = {
+                  specialist: specialist||key,
+                  specialty:  specialty||"",
+                  visits:     [],
+                  illnesses:  [],
+                };
+                return doctorMap[key];
+              }
+
               memberConsults.forEach(c=>{
-                const key=(c.specialist||"Sin médico").trim();
-                if(!doctorMap[key]) doctorMap[key]={specialist:c.specialist||"Sin médico",specialty:c.specialty||"",visits:[]};
-                doctorMap[key].visits.push(c);
+                const key = (c.specialist||"Sin médico asignado").trim();
+                getOrCreate(key, c.specialist, c.specialty).visits.push(c);
               });
-              const doctors=Object.values(doctorMap).sort((a,b)=>{
-                const la=Math.max(...a.visits.map(v=>new Date(v.date)));
-                const lb=Math.max(...b.visits.map(v=>new Date(v.date)));
-                return lb-la;
+              memberIllnesses2.forEach(il=>{
+                const key = (il.doctor||"Sin médico asignado").trim();
+                // Use specialty from matching consult if available
+                const matchedSpec = doctorMap[key]?.specialty || "";
+                getOrCreate(key, il.doctor, matchedSpec).illnesses.push(il);
               });
-              if(selectedDoctor){
-                const doc=doctorMap[selectedDoctor];
-                const visits=(doc?.visits||[]).sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+              const doctors = Object.values(doctorMap).sort((a,b)=>{
+                const lastA = Math.max(
+                  ...(a.visits.map(v=>new Date(v.date).getTime())),
+                  ...(a.illnesses.map(il=>new Date(il.startDate||0).getTime()))
+                );
+                const lastB = Math.max(
+                  ...(b.visits.map(v=>new Date(v.date).getTime())),
+                  ...(b.illnesses.map(il=>new Date(il.startDate||0).getTime()))
+                );
+                return lastB - lastA;
+              });
+
+              // ── Detail view for a selected doctor ──
+              if(selectedDoctor) {
+                const doc = doctorMap[selectedDoctor];
+                const visits    = [...(doc?.visits||[])].sort((a,b)=>new Date(b.date)-new Date(a.date));
+                const illnesses = doc?.illnesses||[];
                 return <>
-                  <button style={{background:"none",border:"none",color:"#4A90A4",cursor:"pointer",fontSize:13,fontWeight:600,padding:"0 0 12px"}} onClick={()=>setSelectedDoctor(null)}>← Todos los médicos</button>
+                  <button
+                    style={{background:"none",border:"none",color:"#4A90A4",cursor:"pointer",
+                      fontSize:13,fontWeight:600,padding:"0 0 12px",display:"block"}}
+                    onClick={()=>setSelectedDoctor(null)}>
+                    ← Todos los médicos
+                  </button>
+
+                  {/* Doctor header */}
                   <div style={{background:"#F5F3EF",borderRadius:12,padding:"12px 14px",marginBottom:14}}>
                     <div style={{fontSize:15,fontWeight:700,color:"#3D405B"}}>👨‍⚕️ {selectedDoctor}</div>
                     {doc?.specialty&&<div style={{fontSize:12,color:"#888"}}>{doc.specialty}</div>}
-                    <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{visits.length} visita{visits.length!==1?"s":""}</div>
+                    <div style={{fontSize:11,color:"#aaa",marginTop:2}}>
+                      {visits.length} consulta{visits.length!==1?"s":""} · {illnesses.length} enfermedad{illnesses.length!==1?"es":""}
+                    </div>
                   </div>
-                  <button style={{...S.addBtn,width:"100%",marginBottom:12}} onClick={()=>{setEditItem({memberId:member.id,specialist:selectedDoctor,specialty:doc?.specialty||""});setModal("consult");}}>+ Nueva consulta con este médico</button>
-                  {visits.map(c=><CCard key={c.id} c={c} onEdit={()=>{setEditItem(c);setModal("consult");}} onDelete={()=>delConsult(c.id)}/>)}
-                  <div style={{fontSize:13,fontWeight:700,color:"#3D405B",margin:"18px 0 8px",paddingTop:14,borderTop:"1px solid #EDE9E3"}}>🤒 Enfermedades y tratamientos</div>
-                  <button style={{...S.addBtn,width:"100%",marginBottom:10}} onClick={()=>{setEditItem({memberId:member.id,active:true});setModal("illness");}}>+ Registrar enfermedad</button>
-                  {memberIllnesses.length===0?<p style={S.empty}>Sin enfermedades registradas.</p>
-                    :memberIllnesses.map(il=><IllnessCard key={il.id} il={il} onEdit={()=>{setEditItem(il);setModal("illness");}} onDelete={()=>delIllness(il.id)} onToggle={()=>toggleIllnessActive(il.id)} medTakes={data.medTakes} onToggleTake={toggleMedTake}/>)}
+
+                  {/* Add buttons */}
+                  <div style={{display:"flex",gap:8,marginBottom:14}}>
+                    <button style={{...S.addBtn,flex:1}}
+                      onClick={()=>{setEditItem({memberId:member.id,specialist:selectedDoctor,specialty:doc?.specialty||""});setModal("consult");}}>
+                      + Consulta
+                    </button>
+                    <button style={{...S.addBtn,flex:1,background:"#FFF0F0",color:"#C0392B",border:"1px solid #F8BCBC"}}
+                      onClick={()=>{setEditItem({memberId:member.id,active:true,doctor:selectedDoctor});setModal("illness");}}>
+                      + Enfermedad
+                    </button>
+                  </div>
+
+                  {/* Illnesses first (active at top) */}
+                  {illnesses.length>0&&<>
+                    <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",
+                      letterSpacing:".5px",marginBottom:8}}>Enfermedades / Tratamientos</div>
+                    {[...illnesses]
+                      .sort((a,b)=>(b.active?1:0)-(a.active?1:0))
+                      .map(il=><IllnessCard key={il.id} il={il}
+                        onEdit={()=>{setEditItem(il);setModal("illness");}}
+                        onDelete={()=>delIllness(il.id)}
+                        onToggle={()=>toggleIllnessActive(il.id)}
+                        medTakes={data.medTakes}
+                        onToggleTake={toggleMedTake}/>)
+                    }
+                  </>}
+
+                  {/* Consultations */}
+                  {visits.length>0&&<>
+                    <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",
+                      letterSpacing:".5px",margin:"14px 0 8px"}}>Consultas</div>
+                    {visits.map(c=><CCard key={c.id} c={c}
+                      onEdit={()=>{setEditItem(c);setModal("consult");}}
+                      onDelete={()=>delConsult(c.id)}/>)}
+                  </>}
+
+                  {visits.length===0&&illnesses.length===0&&
+                    <p style={S.empty}>Sin registros para este médico.</p>}
                 </>;
               }
+
+              // ── Doctor list view ──
               return <>
-                <button style={{...S.addBtn,width:"100%",marginBottom:12}} onClick={()=>{setEditItem({memberId:member.id});setModal("consult");}}>+ Nueva consulta</button>
-                {doctors.length===0?<p style={S.empty}>Sin consultas cargadas.</p>
+                <button style={{...S.addBtn,width:"100%",marginBottom:12}}
+                  onClick={()=>{setEditItem({memberId:member.id});setModal("consult");}}>
+                  + Nueva consulta
+                </button>
+                {doctors.length===0
+                  ?<p style={S.empty}>Sin historial médico registrado.</p>
                   :doctors.map(doc=>{
-                    const lv=[...doc.visits].sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
-                    return(
-                      <div key={doc.specialist} style={{background:"#fff",borderRadius:12,padding:"12px 14px",marginBottom:8,boxShadow:"0 1px 5px rgba(0,0,0,.05)",cursor:"pointer",display:"flex",alignItems:"center",gap:12}} onClick={()=>setSelectedDoctor(doc.specialist)}>
-                        <div style={{width:44,height:44,borderRadius:22,background:member.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>👨‍⚕️</div>
+                    const allDates = [
+                      ...doc.visits.map(v=>v.date),
+                      ...doc.illnesses.map(il=>il.startDate)
+                    ].filter(Boolean).sort().reverse();
+                    const lastDate = allDates[0];
+                    const hasActive = doc.illnesses.some(il=>il.active);
+                    return (
+                      <div key={doc.specialist}
+                        style={{background:"#fff",borderRadius:12,padding:"12px 14px",
+                          marginBottom:8,boxShadow:"0 1px 5px rgba(0,0,0,.05)",
+                          cursor:"pointer",display:"flex",alignItems:"center",gap:12,
+                          border:hasActive?"1px solid #F8BCBC":"1px solid transparent"}}
+                        onClick={()=>setSelectedDoctor(doc.specialist)}>
+                        <div style={{width:44,height:44,borderRadius:22,
+                          background:member.color+"22",display:"flex",alignItems:"center",
+                          justifyContent:"center",fontSize:22,flexShrink:0}}>👨‍⚕️</div>
                         <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:14,fontWeight:700,color:"#3D405B",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{doc.specialist}</div>
+                          <div style={{fontSize:14,fontWeight:700,color:"#3D405B",
+                            overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            {doc.specialist}
+                          </div>
                           {doc.specialty&&<div style={{fontSize:11,color:"#888"}}>{doc.specialty}</div>}
-                          <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{doc.visits.length} visita{doc.visits.length!==1?"s":""} · Última: {fmt(lv?.date)}</div>
+                          <div style={{fontSize:11,color:"#aaa",marginTop:2}}>
+                            {doc.visits.length>0&&`${doc.visits.length} consulta${doc.visits.length!==1?"s":""}`}
+                            {doc.visits.length>0&&doc.illnesses.length>0&&" · "}
+                            {doc.illnesses.length>0&&`${doc.illnesses.length} enfermedad${doc.illnesses.length!==1?"es":""}`}
+                            {lastDate&&` · ${fmt(lastDate)}`}
+                          </div>
+                          {hasActive&&<div style={{fontSize:10,color:"#C0392B",fontWeight:600,marginTop:2}}>● Tratamiento activo</div>}
                         </div>
                         <span style={{color:"#bbb",fontSize:16}}>›</span>
                       </div>
                     );
                   })
                 }
-                <div style={{fontSize:13,fontWeight:700,color:"#3D405B",margin:"18px 0 8px",paddingTop:14,borderTop:"1px solid #EDE9E3"}}>🤒 Enfermedades y tratamientos</div>
-                <button style={{...S.addBtn,width:"100%",marginBottom:10}} onClick={()=>{setEditItem({memberId:member.id,active:true});setModal("illness");}}>+ Registrar enfermedad</button>
-                {memberIllnesses.length===0?<p style={S.empty}>Sin enfermedades registradas.</p>
-                  :memberIllnesses.map(il=><IllnessCard key={il.id} il={il} onEdit={()=>{setEditItem(il);setModal("illness");}} onDelete={()=>delIllness(il.id)} onToggle={()=>toggleIllnessActive(il.id)} medTakes={data.medTakes} onToggleTake={toggleMedTake}/>)}
               </>;
             })()}
             {/* TURNOS */}
