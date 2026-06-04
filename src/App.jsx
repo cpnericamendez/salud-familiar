@@ -689,7 +689,47 @@ export default function App() {
                       <span style={{fontWeight:600,fontSize:13,color:"#C0392B"}}>{il.name}</span>
                       <span style={{fontSize:12,color:"#888"}}> · {mb?.name}</span>
                     </div>
-                    {il.medications?.length>0&&<span style={{fontSize:11,color:"#888"}}>💊 {il.medications.length} medicamento{il.medications.length>1?"s":""}</span>}
+                    {il.medications?.length>0&&(
+                      <div style={{marginTop:4}}>
+                        {il.medications.filter(m=>m.doses?.length>0).map((med,mi)=>{
+                          const now = new Date();
+                          const nextDose = med.doses?.find(d=>!d.tomada);
+                          const nextDt = nextDose ? new Date(nextDose.datetime) : null;
+                          const takenCount = med.doses?.filter(d=>d.tomada).length||0;
+                          const totalCount = med.doses?.length||0;
+                          return (
+                            <div key={mi} style={{background:"#FFF7ED",borderRadius:8,padding:"8px 10px",marginBottom:4}}>
+                              <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between"}}>
+                                <div>
+                                  <span style={{fontSize:13,fontWeight:700,color:"#7D5A30"}}>💊 {med.name}</span>
+                                  <span style={{fontSize:11,color:"#888",marginLeft:6}}>Toma {takenCount+1} de {totalCount}</span>
+                                </div>
+                                {nextDose&&<button
+                                  style={{background:"#E07A5F",color:"#fff",border:"none",borderRadius:20,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}
+                                  onClick={()=>{
+                                    const updated = {...il, medications: il.medications.map((m,i)=>
+                                      i===mi ? {...m, doses: m.doses.map((d,di)=>
+                                        di===m.doses.findIndex(x=>!x.tomada) ? {...d,tomada:true} : d
+                                      )} : m
+                                    )};
+                                    setDataTS(d=>({...d,illnesses:(d.illnesses||[]).map(x=>x.id===il.id?updated:x)}));
+                                  }}>
+                                  ✅ Marcar toma
+                                </button>}
+                              </div>
+                              {nextDt&&<div style={{fontSize:10,color:"#C9A96E",marginTop:2}}>Próxima: {nextDt.toLocaleString("es-AR",{weekday:"short",hour:"2-digit",minute:"2-digit"})}</div>}
+                              {/* Progress bar */}
+                              <div style={{height:4,background:"#EDE9E3",borderRadius:2,overflow:"hidden",marginTop:5}}>
+                                <div style={{height:"100%",background:"#5B8C5A",borderRadius:2,width:totalCount>0?`${Math.round(takenCount/totalCount*100)}%`:"0%"}}/>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {il.medications.filter(m=>!m.doses?.length).length>0&&(
+                          <span style={{fontSize:11,color:"#888"}}>💊 {il.medications.filter(m=>!m.doses?.length).length} medicamento{il.medications.filter(m=>!m.doses?.length).length>1?"s":""}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1902,8 +1942,17 @@ function ConsultModal({initial,members,onSave,onClose}) {
       <textarea style={{...S.ta,background:"#FFFBF0",border:"1px solid #F2CC8F"}} rows={2} value={f.reason} onChange={e=>s("reason",e.target.value)} placeholder="¿Por qué se consulta? Ej: Fiebre de 3 días, control de rutina..."/>
       <Lb>Diagnóstico</Lb>
       <textarea style={S.ta} rows={2} value={f.diagnosis} onChange={e=>s("diagnosis",e.target.value)} placeholder="Diagnóstico..."/>
-      <Lb>Medicamentos recetados</Lb>
-      <textarea style={S.ta} rows={2} value={f.medications} onChange={e=>s("medications",e.target.value)} placeholder="Medicamentos, dosis, duración..."/>
+      <Lb>Medicamentos y tratamiento</Lb>
+      {(Array.isArray(f.medications)?f.medications:[]).map((med,mi)=>(
+        <div key={mi} style={{background:"#F5F3EF",borderRadius:10,padding:"10px 12px",marginBottom:8,position:"relative"}}>
+          <button onClick={()=>s("medications",(f.medications||[]).filter((_,i)=>i!==mi))}
+            style={{position:"absolute",top:6,right:8,background:"none",border:"none",color:"#E07A5F",cursor:"pointer",fontSize:14}}>✕</button>
+          <div style={{fontWeight:600,fontSize:13,color:"#3D405B",marginBottom:4}}>💊 {med.name}{med.dose&&` · ${med.dose}`}</div>
+          <div style={{fontSize:11,color:"#888"}}>Cada {med.freqHours}h · {med.durationDays} días · {med.totalDoses} tomas totales</div>
+          <div style={{fontSize:11,color:"#5B8C5A",marginTop:2}}>Primera toma: {med.firstDose?.slice(0,16).replace("T"," ")}</div>
+        </div>
+      ))}
+      <MedScheduleForm onAdd={med=>s("medications",[...(Array.isArray(f.medications)?f.medications:[]),med])}/>
       <Lb>Indicaciones / Próximos pasos</Lb>
       <textarea style={S.ta} rows={2} value={f.nextSteps} onChange={e=>s("nextSteps",e.target.value)} placeholder="Indicaciones del médico..."/>
       <div style={{display:"flex",gap:10}}>
@@ -2885,6 +2934,90 @@ function SmartInput({ members, onSaveAppt, onSaveConsult }) {
     </div>
   );
 }
+
+// ══════════════════════════════════════════
+//  MED SCHEDULE FORM + AUTO-GENERATOR
+// ══════════════════════════════════════════
+function generateSchedule(name, dose, freqHours, durationDays, firstDoseISO) {
+  const doses = [];
+  const start = new Date(firstDoseISO);
+  const totalDoses = Math.round((durationDays * 24) / freqHours);
+  for(let i = 0; i < totalDoses; i++) {
+    const d = new Date(start.getTime() + i * freqHours * 3600000);
+    doses.push({ datetime: d.toISOString(), tomada: false });
+  }
+  return { name, dose, freqHours, durationDays, totalDoses, firstDose: firstDoseISO, doses };
+}
+
+function MedScheduleForm({ onAdd }) {
+  const [show, setShow]   = useState(false);
+  const [name, setName]   = useState("");
+  const [dose, setDose]   = useState("");
+  const [freq, setFreq]   = useState("8");
+  const [days, setDays]   = useState("7");
+  const [first, setFirst] = useState(()=>{
+    const now = new Date(); now.setMinutes(0,0,0);
+    return now.toISOString().slice(0,16);
+  });
+
+  const FREQS = [
+    {label:"Cada 4 horas",val:"4"},{label:"Cada 6 horas",val:"6"},
+    {label:"Cada 8 horas",val:"8"},{label:"Cada 12 horas",val:"12"},
+    {label:"Una vez al día",val:"24"},{label:"Dos veces al día",val:"12"},
+  ];
+
+  function add() {
+    if(!name.trim()){alert("Ingresá el nombre del medicamento.");return;}
+    const med = generateSchedule(name.trim(), dose.trim(), parseInt(freq), parseInt(days), first+":00");
+    onAdd(med);
+    setName(""); setDose(""); setFreq("8"); setDays("7"); setShow(false);
+  }
+
+  const totalDoses = freq&&days ? Math.round((parseInt(days)*24)/parseInt(freq)) : 0;
+
+  if(!show) return (
+    <button onClick={()=>setShow(true)}
+      style={{width:"100%",padding:"8px",background:"#F5F3EF",border:"1px dashed #C9A96E",
+        borderRadius:8,color:"#7D5A30",fontSize:13,cursor:"pointer",fontWeight:600,marginBottom:4}}>
+      + Agregar medicamento al tratamiento
+    </button>
+  );
+
+  return (
+    <div style={{background:"#FFF7ED",border:"1px solid #F2CC8F",borderRadius:10,padding:"12px",marginBottom:8}}>
+      <div style={{fontSize:12,fontWeight:700,color:"#7D5A30",marginBottom:10}}>💊 Nuevo medicamento</div>
+      <input placeholder="Nombre (ej: Amoxicilina)" value={name} onChange={e=>setName(e.target.value)}
+        style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:8,border:"1px solid #F2CC8F",fontSize:13,marginBottom:6,fontFamily:"inherit"}}/>
+      <input placeholder="Dosis (ej: 250mg)" value={dose} onChange={e=>setDose(e.target.value)}
+        style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:8,border:"1px solid #F2CC8F",fontSize:13,marginBottom:6,fontFamily:"inherit"}}/>
+      <div style={{display:"flex",gap:6,marginBottom:6}}>
+        <select value={freq} onChange={e=>setFreq(e.target.value)}
+          style={{flex:1,padding:"8px",borderRadius:8,border:"1px solid #F2CC8F",fontSize:13,fontFamily:"inherit"}}>
+          {FREQS.map(f=><option key={f.val+"_"+f.label} value={f.val}>{f.label}</option>)}
+        </select>
+        <input type="number" min="1" max="60" placeholder="Días" value={days} onChange={e=>setDays(e.target.value)}
+          style={{width:70,padding:"8px",borderRadius:8,border:"1px solid #F2CC8F",fontSize:13,fontFamily:"inherit",textAlign:"center"}}/>
+      </div>
+      <div style={{fontSize:11,color:"#888",marginBottom:4}}>Fecha y hora de la PRIMERA TOMA:</div>
+      <input type="datetime-local" value={first} onChange={e=>setFirst(e.target.value)}
+        style={{width:"100%",boxSizing:"border-box",padding:"8px",borderRadius:8,border:"1px solid #F2CC8F",fontSize:13,marginBottom:8,fontFamily:"inherit"}}/>
+      {totalDoses>0&&<div style={{fontSize:11,color:"#5B8C5A",marginBottom:8,fontWeight:600}}>
+        ✓ Se generarán {totalDoses} tomas automáticamente
+      </div>}
+      <div style={{display:"flex",gap:6}}>
+        <button onClick={add}
+          style={{flex:1,padding:"9px",background:"#3D405B",color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+          Agregar
+        </button>
+        <button onClick={()=>setShow(false)}
+          style={{padding:"9px 14px",background:"none",border:"1px solid #ddd",borderRadius:8,fontSize:13,cursor:"pointer"}}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
 
 const S = {
   app:     {minHeight:"100vh",background:"#FAF8F5",fontFamily:"'DM Sans',sans-serif",color:"#3D405B"},
